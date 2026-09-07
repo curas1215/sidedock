@@ -1,0 +1,186 @@
+,7 @@
+   let result = { ok: false, code: 'UNKNOWN_BROWSER_COMMAND', message: '未知 Browser Adapter 命令。' };
+   try {
+     if (command.type === 'ping') {
+-      return { ok: true, code: 'OK', version: '1.5.13', extensionId: chrome.runtime.id };
++      return { ok: true, code: 'OK', version: '1.5.14', extensionId: chrome.runtime.id };
+     }
+     if (command.type === 'capture-active-page') {
+       const located = await findActiveReadableTabForDesktop(command.targetLease || null);
+@@ -858,13 +858,10 @@
+   browserCommandLoopRunning = true;
+   try {
+     while (true) {
+-      // Native Messaging is the primary v1.5 transport. Do not keep a localhost
+-      // long-poll alive while the native channel is healthy; HTTP wakes only as
+-      // a compatibility fallback and still performs zero DOM reads by itself.
+-      if (SideDockDesktopBridge.nativeDiagnostics?.().connected) {
+-        await sleep(1200);
+-        continue;
+-      }
++      // v1.5.14: keep one localhost long-poll armed even while Native Messaging
++      // is connected. Native connectivity is not command-health. The long-poll
++      // performs ZERO DOM reads by itself and lets Desktop hedge immediately when
++      // a connected-but-stalled Native port stops returning commands.
+       const reply = await SideDockDesktopBridge.getNextCommand(18000);
+       if (reply?.ok && reply.command) {
+         const result = await executeDesktopBrowserCommand(reply.command);
+--- /dev/null
++++ b/desktop/app/src/context/running-host-identity.js
+@@ -0,0 +1,130 @@
++const fs = require('fs');
++const path = require('path');
++const os = require('os');
++const crypto = require('crypto');
++const { execFile } = require('child_process');
++
++function clone(v) { return v ? JSON.parse(JSON.stringify(v)) : v; }
++function readJson(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
++function sha256File(file) {
++  try { const h = crypto.createHash('sha256'); h.update(fs.readFileSync(file)); return h.digest('hex'); } catch { return ''; }
++}
++function sha256Text(text) { return crypto.createHash('sha256').update(String(text || '')).digest('hex'); }
++
++function sha256Directory(root) {
++  // Must be byte-for-byte compatible with install.command tree_fingerprint().
++  // The frozen Host receipt and the running Host identity must compute the
++  // same value or TCC identity diagnostics would falsely report a mismatch.
++  try {
++    const files=[]; const links=[];
++    const walk=(dir)=>{
++      for(const name of fs.readdirSync(dir).sort()){
++        const full=path.join(dir,name); const st=fs.lstatSync(full);
++        if(st.isDirectory()) walk(full);
++        else if(st.isFile()) files.push(full);
++        else if(st.isSymbolicLink()) links.push(full);
++      }
++    };
++    walk(root);
++    const rows=[];
++    for(const full of files.sort()){
++      const rel=`./${path.relative(root,full).split(path.sep).join('/')}`;
++      rows.push(`F ${sha256File(full)} ${rel}\n`);
++    }
++    for(const full of links.sort()){
++      const rel=`./${path.relative(root,full).split(path.sep).join('/')}`;
++      rows.push(`L ${fs.readlinkSync(full)} ${rel}\n`);
++    }
++    return crypto.createHash('sha256').update(rows.join('')).digest('hex');
++  } catch { return ''; }
++}
++
++function realpath(file) { try { return fs.realpathSync(file); } catch { return path.resolve(String(file || '')); } }
++function deriveAppBundlePath(execPath = process.execPath) {
++  const value = realpath(execPath);
++  const marker = `${path.sep}Contents${path.sep}MacOS${path.sep}`;
++  const at = value.lastIndexOf(marker);
++  return at > 0 ? value.slice(0, at) : '';
++}
++function run(file, args, timeout = 1500) {
++  return new Promise((resolve) => execFile(file, args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => resolve({ error, stdout:String(stdout || ''), stderr:String(stderr || '') })));
++}
++function parseCodesign(stderr = '') {
++  const text = String(stderr || '');
++  const identifier = (text.match(/^Identifier=(.+)$/m) || [])[1] || '';
++  const cdHash = (text.match(/^CDHash=(.+)$/m) || [])[1] || '';
++  const teamIdentifier = (text.match(/^TeamIdentifier=(.+)$/m) || [])[1] || '';
++  return { identifier:identifier.trim(), cdHash:cdHash.trim(), teamIdentifier:teamIdentifier.trim() };
++}
++function compareInstalledIdentity(current = {}, receipt = {}) {
++  const receiptPath = String(receipt.canonicalAppPath || receipt.appBundlePath || '');
++  const pathMatch = !receiptPath || realpath(receiptPath) === realpath(current.appBundlePath || '');
++  const bundleMatch = !receipt.bundleId || String(receipt.bundleId) === String(current.bundleId || '');
++  const abiMatch = !receipt.hostAbi || Number(receipt.hostAbi) === Number(current.hostAbi || 0);
++  const generationMatch = !receipt.hostGeneration || String(receipt.hostGeneration) === String(current.hostGeneration || '');
++  const bootstrapMatch = !receipt.bootstrapSha256 || String(receipt.bootstrapSha256) === String(current.bootstrapSha256 || '');
++  const hostResourcesMatch = !receipt.hostResourcesSha256 || String(receipt.hostResourcesSha256) === String(current.hostResourcesSha256 || '');
++  const executableMatch = !receipt.executableSha256 || String(receipt.executableSha256) === String(current.executableSha256 || '');
++  const requirementMatch = !receipt.designatedRequirement || String(receipt.designatedRequirement) === String(current.designatedRequirement || '');
++  const fingerprintMatch = !receipt.hostFingerprint || String(receipt.hostFingerprint) === String(current.hostFingerprint || '');
++  const same = pathMatch && bundleMatch && abiMatch && generationMatch && bootstrapMatch && hostResourcesMatch && executableMatch && requirementMatch && fingerprintMatch;
++  return { same, pathMatch, bundleMatch, abiMatch, generationMatch, bootstrapMatch, hostResourcesMatch, executableMatch, requirementMatch, fingerprintMatch };
++}
++
++class RunningHostIdentityService {
++  constructor({ supportRoot = '', execPathProvider = () => process.execPath, pidProvider = () => process.pid, ppidProvider = () => process.ppid, platform = process.platform } = {}) {
++    this.supportRoot = supportRoot || process.env.SIDEDOCK_SUPPORT_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'SideDock');
++    this.execPathProvider = execPathProvider;
++    this.pidProvider = pidProvider;
++    this.ppidProvider = ppidProvider;
++    this.platform = platform;
++    this.last = null;
++  }
++
++  receipt() {
++    return readJson(path.join(this.supportRoot, 'HOST_RECEIPT.json')) || readJson(path.join(this.supportRoot, 'INSTALL_RECEIPT_v1514.json')) || readJson(path.join(this.supportRoot, 'INSTALL_RECEIPT_v1513.json')) || readJson(path.join(this.supportRoot, 'INSTALL_RECEIPT_v1512.json')) || {};
++  }
++  runtimePointer() { return readJson(path.join(this.supportRoot, 'active-runtime.json')) || {}; }
++
++  async snapshot() {
++    const execPath = realpath(this.execPathProvider());
++    const appBundlePath = deriveAppBundlePath(execPath);
++    const hostAppRoot = appBundlePath ? path.join(appBundlePath, 'Contents', 'Resources', 'app') : '';
++    const abi = readJson(hostAppRoot ? path.join(hostAppRoot, 'HOST_ABI.json') : '') || {};
++    const active = this.runtimePointer();
++    let designatedRequirement = '';
++    let codeSigningIdentifier = '';
++    let cdHash = '';
++    let teamIdentifier = '';
++    if (this.platform === 'darwin' && appBundlePath) {
++      const req = await run('/usr/bin/codesign', ['-d', '-r-', appBundlePath]);
++      designatedRequirement = ((req.stderr || req.stdout).match(/^designated => (.+)$/m) || [])[1] || '';
++      const detail = await run('/usr/bin/codesign', ['-dv', '--verbose=4', appBundlePath]);
++      const parsed = parseCodesign(detail.stderr || detail.stdout);
++      codeSigningIdentifier = parsed.identifier; cdHash = parsed.cdHash; teamIdentifier = parsed.teamIdentifier;
++    }
++    const bootstrapPath = hostAppRoot ? path.join(hostAppRoot, 'bootstrap.js') : '';
++    const abiPath = hostAppRoot ? path.join(hostAppRoot, 'HOST_ABI.json') : '';
++    const executableSha256 = sha256File(execPath);
++    const bootstrapSha256 = sha256File(bootstrapPath);
++    const hostAbiSha256 = sha256File(abiPath);
++    const hostResourcesSha256 = hostAppRoot ? sha256Directory(hostAppRoot) : '';
++    const hostFingerprint = sha256Text(JSON.stringify({
++      appBundlePath:realpath(appBundlePath || ''), bundleId:String(abi.bundleId || 'com.sidedock.desktop'), hostAbi:Number(abi.hostAbi || process.env.SIDEDOCK_HOST_ABI || 0), hostGeneration:String(abi.hostGeneration || process.env.SIDEDOCK_HOST_GENERATION || ''), freezeContract:String(abi.freezeContract || ''), executableSha256, bootstrapSha256, hostAbiSha256, hostResourcesSha256, designatedRequirement
++    }));
++    const current = {
++      pid:Number(this.pidProvider() || 0), ppid:Number(this.ppidProvider() || 0), execPath, appBundlePath:realpath(appBundlePath || ''),
++      bundleId:String(abi.bundleId || 'com.sidedock.desktop'), hostAbi:Number(abi.hostAbi || process.env.SIDEDOCK_HOST_ABI || 0), hostGeneration:String(abi.hostGeneration || process.env.SIDEDOCK_HOST_GENERATION || ''), freezeContract:String(abi.freezeContract || ''),
++      runtimeVersion:String(process.env.SIDEDOCK_RUNTIME_VERSION || active.version || ''), runtimePath:String(process.env.SIDEDOCK_RUNTIME_ROOT || active.runtimePath || ''),
++      executableSha256, bootstrapSha256, hostAbiSha256, hostResourcesSha256, codeSigningIdentifier, designatedRequirement:String(designatedRequirement || '').trim(), cdHash, teamIdentifier, hostFingerprint,
++      capturedAt:Date.now()
++    };
++    const receipt = this.receipt();
++    const comparison = compareInstalledIdentity(current, receipt);
++    this.last = { ...current, installedHostFingerprint:String(receipt.hostFingerprint || ''), installedCanonicalAppPath:String(receipt.canonicalAppPath || receipt.appBundlePath || ''), installedAppTreeSha256:String(receipt.appTreeSha256 || ''), hostFrozen:Boolean(receipt.hostFrozen || receipt.hostGeneration==='H1'), sameAsInstalledHost:comparison.same, identityComparison:comparison, receiptContract:String(receipt.contract || '') };
++    return clone(this.last);
++  }
++  getSnapshot() { return clone(this.last); }
++}
++
++module.exports = { RunningHostIdentityService, deriveAppBundlePath, compareInstalledIdentity, sha256File, sha256Text, sha256Directory };
+--- /dev/null
++++ b/tests/test_v1514_stable_h1_identity_repair.js
+@@ -0,0 +1,24 @@
++const fs=require('fs'),path=require('path'),assert=require('assert');
++const root=path.join(__dirname,'..');
++const install=fs.readFileSync(path.join(root,'desktop/install.command'),'utf8');
++const verify=fs.readFileSync(path.join(root,'desktop/verify_mac_smoke.command'),'utf8');
++for(const token of [
++  'HOST_IDENTITY_SCHEME="AD_HOC_STABLE_CUSTOM_DR_V1"',
++  'HOST_STABLE_REQUIREMENT=',
++  'designated => identifier "com.sidedock.desktop"',
++  'info[CFBundleIdentifier] = "com.sidedock.desktop"',
++  'HOST_IDENTITY_REPAIR=1',
++  'weak v1.5.13 H1 signing identity detected',
++  'codesign --force --deep --sign -',
++  'codesign --force --sign - --requirements "=$HOST_STABLE_REQUIREMENT"',
++  'codesign --verify --deep --strict -R "=$HOST_STABLE_REQUIREMENT"',
++  'designatedRequirementStable',
++  'hostIdentityRepair',
++  'hostIdentityScheme'
++]) assert(install.includes(token),token);
++assert(install.includes('an authorized H1 Host is already recorded; ordinary installers must never replace it.'),'ordinary authorized H1 migration protection must remain');
++assert(install.includes('[ "$HOST_IDENTITY_REPAIR" -ne 1 ]'),'only the explicit weak-identity repair may bypass the ordinary H1 migration refusal');
++assert(!/tccutil\s+reset/i.test(install),'installer must never reset user TCC decisions');
++assert(verify.includes('AD_HOC_STABLE_CUSTOM_DR_V1')&&verify.includes('designatedRequirementStable'),'real-Mac gate must verify stable H1 signing identity');
++assert(verify.includes('identifier "com.sidedock.d
