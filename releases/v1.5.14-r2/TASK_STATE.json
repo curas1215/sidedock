@@ -1,0 +1,53 @@
+{
+  "contract": "sidedock-task-state/1",
+  "version": "1.5.14",
+  "installerRevision": "R2",
+  "status": "CODE_VALIDATED_V1514_R2_REAL_MAC_TCC_WINDOW_GATE_PENDING",
+  "updatedAt": "2026-09-08",
+  "latestRealMacEvidence": {
+    "stage": "[2/9] Preparing immutable Permission Host",
+    "error": "codesign Requirement syntax error: unexpected token: designated",
+    "rootCause": "typed internal requirement set was passed to codesign -R test-requirement",
+    "commitReached": false,
+    "codeStatus": "CLOSED_R2",
+    "targetMacRetest": "PENDING"
+  },
+  "r2Closure": {
+    "signingRequirement": "HOST_STABLE_REQUIREMENT keeps designated => and is used only by codesign --requirements",
+    "testRequirement": "HOST_STABLE_TEST_REQUIREMENT omits designated => and is used by codesign -R",
+    "regressionGuard": "forbidden -R with HOST_STABLE_REQUIREMENT is asserted absent",
+    "existingInstallSafety": "reported failure occurred before Atomic Commit; existing installed Host was not intentionally replaced by this path"
+  },
+  "automatedRegression": {
+    "total": 132,
+    "pass": 132,
+    "fail": 0
+  },
+  "activeStaticQA": {
+    "javascript": "217/217 PASS",
+    "shell": "6/6 PASS",
+    "json": "11/11 PASS",
+    "staticReadOnlyNoTccResetNoUserCompiler": "PASS"
+  },
+  "packagingQA": {
+    "manifestFiles": 1161,
+    "manifestMismatches": 0,
+    "zipIntegrity": "PASS",
+    "reverseExtractRegression": "132/132 PASS",
+    "buildManifestSha256": "5d190192c7fcbd49eeedafd46678b9d06921dafe80fef67ca6e95d5987a7a817",
+    "zipSha256": "de1f502eb3d056d62f34e082b02c116265e611bf8cd0de0d204f24023606aba5"
+  },
+  "pendingRealMac": [
+    "R2 installer passes the corrected codesign requirement verification on the target Mac",
+    "one-time H1 Screen Recording and Accessibility authorization if requested",
+    "full quit/reopen reports both permissions GRANTED for the running H1",
+    "second R2 install proves Runtime-only continuity and unchanged Host identity",
+    "WindowServer exact-window visual fallback for Activity Monitor, Terminal and Feishu",
+    "live Chrome Native-timeout to HTTP hot fallback and multi-window isolation",
+    "ChatGPT attachment ACK gate",
+    "outside-click latency gate",
+    "pre-focus session/snapshot gate",
+    "no-full-display scope gate"
+  ],
+  "truthPolicy": "Do not mark FULLY_VERIFIED_ON_TARGET_MAC until target-Mac TCC/WindowServer/Chrome/ChatGPT evidence passes."
+}
