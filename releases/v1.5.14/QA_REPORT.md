@@ -1,91 +1,135 @@
-# SideDock v1.5.14 H1 Stable TCC + Browser Hot-Standby QA REPORT
+# SideDock v1.5.14 QA REPORT
 
 ## Release status
 
-`CODE_VALIDATED_REAL_MAC_V1514_STABLE_TCC_GATE_PENDING`
+`CODE_VALIDATED_V1514_REAL_MAC_TCC_WINDOW_GATE_PENDING`
 
-This package is **not** labeled `FULLY_VERIFIED_ON_TARGET_MAC`. The code-side/install-architecture root causes identified from the v1.5.13 real-Mac evidence are closed and automated QA passes, but macOS TCC, WindowServer and live Chrome/ChatGPT evidence can only be produced by the target Mac.
+v1.5.14 的代码、自动化回归、语法与静态安全 Gate 已通过；**没有**把 Linux 容器无法模拟的 macOS TCC / WindowServer / 真实 ChatGPT DOM 标成 PASS。
 
-## Why v1.5.14 exists
+## 本版解决的两个剩余 P0
 
-The v1.5.13 real-Mac evidence already showed that the external concrete window was being resolved correctly: the request target, CGWindowID/bounds and PreActivationSession could align. The remaining failures were later in the chain:
+### P0-1 H1 / TCC identity
 
-1. H1 still ended in `TCC_GRANT_NOT_APPLIED`/Screen+AX denied after the user returned from System Settings.
-2. Browser Adapter Native Messaging could be `connected` while command round-trip timed out; the old Extension stopped its HTTP command long-poll whenever Native looked connected, so Desktop's fallback was not actually hot.
+已实现：
+- 一次性识别 v1.5.13 弱 H1 identity；
+- `AD_HOC_STABLE_CUSTOM_DR_V1`；
+- 固定显式 Designated Requirement；
+- `codesign --requirements "=<literal source>"`；
+- staging 与 commit 后都执行 `codesign --verify --deep --strict -R`；
+- Host receipt / install receipt / upgrade identity 三处记录稳定 identity；
+- 稳定 H1 之后普通更新只能更新外部 Runtime；
+- Host tree hash / DR / fingerprint 任何变化都失败；
+- 不执行 `tccutil reset`。
 
-v1.5.14 fixes those two architecture defects without rewriting the already-passing window resolver.
+### P0-2 Browser Adapter Native connected-but-stalled
 
-## P0 closure 1 — stable H1 privacy identity
-
-- Host ABI remains `1`, generation remains `H1`.
-- Freeze contract advances once from `sidedock-h1-freeze/1` to `sidedock-h1-freeze/2` because the signing identity changes.
-- Installer creates/reuses `~/Library/Application Support/SideDock/Signing/SideDock-H1.keychain-db`.
-- H1 is signed with a persistent self-signed Code Signing certificate and explicit DR: `certificate leaf = H"<persistent SHA1>" and identifier "com.sidedock.desktop"`.
-- Installer hard-fails empty DR, `cdhash` DR, wrong bundle identity, ad-hoc signature or missing authority.
-- After `/2`, routine updates are Runtime-only and verify the whole `SideDock.app` tree/DR before and after.
-- Normal uninstall does not execute `tccutil reset` and preserves the local H1 signing identity.
-- Runtime exposes `HOST_IDENTITY_MISMATCH` and `HOST_SIGNING_IDENTITY_UNSTABLE`; permission blockers stop before any pixel backend invocation.
-
-## P0 closure 2 — Browser Native connected-but-dead channel
-
-- Native command health is measured at command level, not by Port `connected`.
-- Health probe: 450ms; Native capture budget <=1200ms.
-- Timeout creates a short degraded window; later requests fast-fail Native and immediately use fallback.
-- Chrome Extension always keeps one localhost `/v1/browser-command/next` long-poll active even while Native Messaging is connected; the poll reads zero DOM.
-- Native and HTTP use the same requestId; Extension request cache deduplicates the running promise/result, preserving exactly-once DOM reads.
-
-## Preserved P0 behavior
-
-Pre-focus target identity, Chrome multi-window binding, thin-strip rejection, exact-first WindowID capture, no automatic full-screen capture, Terminal/Activity Monitor/Feishu visual escalation, attachment Preview+Upload Ready+ACK, outside-click priority, IME/typing idle protection and external-app read-only rules are preserved.
+已实现：
+- HTTP localhost command long-poll 永远保持待命；
+- Native 350ms hedge window；
+- Native / HTTP 共用 requestId；
+- Extension request cache 进行 running/done 去重，避免重复 DOM read；
+- Native command health / 5s circuit breaker；
+- Native outstanding timeout 上限 1.4s；
+- circuit unhealthy 时直接 HTTP bypass。
 
 ## Automated regression
 
-- **130 / 130 PASS**
+最终源码冻结回归：
+- **131 / 131 PASS**
 - **0 FAIL**
 
-New v1.5.14 gates cover stable H1 signing/DR installer contract, Browser HTTP hot standby, shared requestId failover, Native command health/degradation and the stronger non-fabricable target-Mac Gate.
+日志：`logs/v1514_full_regression_final.log`
 
-## Static / syntax QA
+其中新增 v1.5.14 专项测试：
+- `test_v1514_stable_h1_identity_repair.js`
+- `test_v1514_browser_transport_hedge.js`
+- `test_v1514_native_command_circuit.js`
+- `test_v1514_delivery_version_contract.js`
 
-- JavaScript syntax: **348 / 348 PASS**
-- shell syntax: **23 / 23 PASS**
-- JSON parse: **83 / 83 PASS**
-- screen-wide `desktopCapturer`: **0**
-- executable `CGEventPost`: **0**
-- executable `AXUIElementPerformAction`: **0**
-- executable `AXUIElementSetAttributeValue`: **0**
-- executable `tccutil reset`: **0**
-- installer/user-side compiler/toolchain install calls: **0**
+其余全部 v1.5.x 历史回归继续执行，未删除、不降级。
 
-## Stronger target-Mac Gate
+## Active source syntax QA
 
-`02_实机验收_SideDock_v1.5.14.command` directly checks persistent signing identity fingerprint, `codesign --verify --deep --strict`, live DR, signing authority, non-ad-hoc signature, current frozen Host tree hash, H1 authorization fingerprint and second-install Runtime-only continuity before functional gates.
+- JavaScript: **213 / 213 PASS**
+- Shell: **6 / 6 PASS**
+- JSON: **12 / 12 PASS**
 
-## Final delivery packaging validation
+日志：`logs/v1514_static_syntax_final.log`
 
-The frozen delivery root and a fresh extraction of the ZIP were both independently validated:
+## Static safety QA
 
-- BUILD_MANIFEST entries: **884**, hash/size mismatches: **0**;
-- release-root automated regression: **130/130 PASS**;
-- extracted-ZIP automated regression: **130/130 PASS**;
-- extracted-ZIP JavaScript syntax: **348/348 PASS**;
-- extracted-ZIP shell syntax: **23/23 PASS**;
-- extracted-ZIP JSON parse: **83/83 PASS**;
-- ZIP integrity: **PASS**;
-- manifest re-check after extracted-tree tests: **0 mismatches**.
+全部 PASS：
+- executable `tccutil reset`: 0
+- `CGEventPost(...)` input injection call: 0
+- `AXUIElementSetAttributeValue(...)` write call: 0
+- `AXUIElementPerformAction(...)` action call: 0
+- H1 read-only automation write denylist: present
+- installer user compiler/toolchain invocation: 0
+- browser `getDisplayMedia()` screen-wide capture: 0
+- stable custom DR: present
+- literal requirement `=` prefix: present
+- explicit `codesign -R`: present
+- HTTP command long-poll stays armed while Native connected: PASS
+- 350ms hedge: present
+- same requestId: present
+- running/done request dedup: present
+- Native command circuit: present
 
-## Target-Mac evidence still required
+日志：`logs/v1514_static_safety_final.log`
 
-The following cannot be truthfully marked PASS from the Linux build environment:
+## 无法在当前环境伪造的真实 Mac Gate
 
-1. macOS creates/reuses the local H1 signing identity and `codesign` accepts the staged Host.
-2. Migrated `/2` H1 receives Screen Recording + Accessibility once and reports both GRANTED after full quit/reopen.
-3. Second v1.5.14 install is Runtime-only, leaves `SideDock.app` unchanged and requires no new TCC authorization.
-4. Live WindowServer returns exact Activity Monitor/Terminal/Feishu target pixels.
-5. Live Chrome demonstrates Native-timeout -> HTTP hot fallback and dual-window isolation.
-6. ChatGPT attachment ACK 20/20.
-7. Outside-click 100/100 with P95 <=250ms.
-8. >=50 unique pre-focus sessions/snapshots with zero wrong-window.
-9. No-full-display scope gate.
+以下仍必须由目标 Mac 产生真实证据：
 
-Only after those pass may status become `FULLY_VERIFIED_ON_TARGET_MAC`; no target-Mac PASS is fabricated here.
+1. v1.5.14 weak-H1 identity repair 后，macOS 实际写入指定 DR；
+2. 用户打开 Screen Recording + Accessibility，完全退出/重启后两项实际为 GRANTED；
+3. H1 authorization fingerprint 与当前 HOST_RECEIPT 一致；
+4. 第二次 v1.5.14 安装是 runtime-only，SideDock.app tree hash 完全不变；
+5. 第二次安装与再次重启后权限仍 GRANTED、0 新权限弹窗；
+6. Chrome 正常 Native 与 Native stalled -> HTTP hedge 的真实链路；
+7. Chrome 单窗口/双窗口 exact isolation；
+8. Activity Monitor / Terminal / 飞书真实窗口视觉；
+9. 非 fullscreen target 不得整屏；
+10. Permission denied 50 次 pixel backend delta=0；
+11. ChatGPT live attachment 最近 20 次 20/20 ACK；
+12. outside click >=100、0 FAIL、P95<=250ms；
+13. >=50 个唯一点击前 Session/snapshot，wrongWindow=0；
+14. 输入/IME 与 30 秒生命周期真实行为。
+
+目标 Mac 未完成这些 Gate 前，不能写 `FULLY_VERIFIED_ON_TARGET_MAC`。
+
+## Delivery-tree pre-manifest validation
+
+在新增 v1.5.14 checkpoint 后，对整个交付目录（包含历史 checkpoint/source snapshot）再次做语法扫描：
+
+- JavaScript: **570 / 570 PASS**
+- Shell: **30 / 30 PASS**
+- JSON: **87 / 87 PASS**
+
+日志：`logs/v1514_delivery_tree_syntax_pre_manifest.log`
+
+## Candidate ZIP reverse verification
+
+第一次 artifact freeze 后已在全新目录反解并重新验证：
+
+- Manifest integrity: **PASS**
+- Automated regression: **131 / 131 PASS**
+- Full delivery JavaScript syntax: **570 / 570 PASS**
+- Full delivery Shell syntax: **30 / 30 PASS**
+- Full delivery JSON parse: **88 / 88 PASS**（包含 BUILD_MANIFEST）
+- Static safety: **PASS**
+
+日志：`logs/v1514_packaged_reverse_verification.log`
+
+该日志随后被纳入最终 artifact，并重新生成最终 manifest。最终 artifact 已再次在独立目录反解验证；结果写在包外 `SideDock_v1.5.14_FINAL_VERIFICATION.txt`，避免验证日志写回包内导致 manifest 再变化的循环。
+
+## Final artifact verification
+
+- Final ZIP SHA256: `fb8d9917739a2fe5c93432094d9bfdf76f9076e7cb293045891e66e5d08c445c`
+- BUILD_MANIFEST integrity: **PASS**, **1151** files
+- Automated regression: **131 / 131 PASS**
+- JavaScript syntax: **570 / 570 PASS**
+- Shell syntax: **30 / 30 PASS**
+- JSON parse: **88 / 88 PASS**
+- Static safety: **PASS**
+- Real-Mac TCC/WindowServer/ChatGPT Gate: **PENDING_NOT_FABRICATED**
