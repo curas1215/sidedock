@@ -1,102 +1,45 @@
 # SideDock TASK_STATE
 
 Updated: 2026-09-07
-Status: RECOVERY_IN_PROGRESS
-Release target: next version after v1.5.13
-Policy: NON_DEGRADABLE
+Status: `CODE_VALIDATED_REAL_MAC_V1514_STABLE_TCC_GATE_PENDING`
+Release: `v1.5.14`
+Policy: NON_DEGRADABLE / NO_FABRICATED_PASS
 
-## Last verified runtime
+## Current completion
 
-- Version: 1.5.13
-- Host generation: H1
-- Host ABI: 1
-- Canonical app: `~/Applications/SideDock.app`
-- Runtime: `~/Library/Application Support/SideDock/runtime/1.5.13`
-- Bundle ID: `com.sidedock.desktop`
+v1.5.14 code-side and packaging work is complete. The v1.5.13 exact-window/PreActivationSession/Chrome-window binding path was preserved; the two remaining architecture root causes were fixed:
 
-## Verified PASS from latest real-Mac trace
+1. **H1 TCC identity**: H1 freeze advances once to `sidedock-h1-freeze/2`; installer creates/reuses a persistent zero-cost self-signed Code Signing identity in a SideDock-dedicated keychain and signs `com.sidedock.desktop` with an explicit certificate-leaf + bundle-id Designated Requirement. Routine updates are Runtime-only and may not replace/re-sign `SideDock.app`.
+2. **Browser Native false-health**: Native command-level health uses a short probe + bounded timeout/degraded window; Chrome Extension always keeps HTTP command long-poll hot even when Native is connected; Native/HTTP reuse the same requestId and Extension dedup gives exactly-once DOM-read semantics.
 
-1. Pre-activation target session exists and is authoritative.
-2. Google Chrome concrete target resolved by exact CGWindow match.
-3. CGWindow ID: 210785.
-4. Browser Window -> CGWindow binding is EXACT.
-5. Browser bounds IoU = 1; ambiguity gap = 1; confidence = 1.
-6. Thin/non-content Chrome strip windows are rejected.
-7. Structured-reader failure routes to window-scoped visual fallback.
-8. Visual fallback is eligible for the current-window request.
-9. No whole-screen downgrade is allowed.
+## Automated QA
 
-Do not reimplement these unless affected by the fixes below.
+- Regression: **130/130 PASS**
+- JavaScript syntax: **348/348 PASS**
+- Shell syntax: **23/23 PASS**
+- JSON parse: **83/83 PASS**
+- Manifest: **884/884 files valid, 0 mismatch**
+- Release-root regression: **130/130 PASS**
+- Fresh-extracted ZIP regression: **130/130 PASS**
+- ZIP integrity: **PASS**
+- Static safety: no screen-wide desktopCapturer, no executable CGEventPost/AX writes, no tccutil reset, no target-side compiler/toolchain installation.
 
-## Current P0 blockers
+## Real-Mac gates still pending
 
-### P0-1 macOS TCC grant not applied
+Do **not** call the release `FULLY_VERIFIED_ON_TARGET_MAC` until the user's target Mac proves:
 
-Observed terminal code: `TCC_GRANT_NOT_APPLIED`.
+- local H1 signing identity can be created/reused and `codesign` verifies the staged Host;
+- one-time Screen Recording + Accessibility authorization becomes GRANTED after full quit/reopen;
+- second v1.5.14 install is Runtime-only and preserves TCC without a new permission prompt;
+- exact Activity Monitor/Terminal/Feishu pixels and Chrome single/dual-window isolation;
+- Native-timeout -> HTTP hot fallback on live Chrome;
+- ChatGPT attachment 20/20 ACK;
+- outside-click 100/100, P95 <=250ms;
+- >=50 unique pre-focus sessions/snapshots, zero wrong-window;
+- no-full-display scope gate.
 
-The user completed a privacy-settings round trip and confirmed enablement, but the running H1 host still observes:
+## Next action
 
-- Screen Recording: DENIED
-- Accessibility: DENIED
-- pixel capture allowed: false
-- AX read allowed: false
-- H1 authorization: false
+On the target Mac: install v1.5.14 once -> authorize Screen Recording + Accessibility -> fully quit/reopen SideDock -> run the same installer a second time -> run `02_实机验收_SideDock_v1.5.14.command`.
 
-The running host matches the installed host fingerprint, so this is no longer a target-resolution problem.
-
-Release requirement: do not mark permission success from UI confirmation. Success requires an OS-level preflight/real capture proof after the canonical host relaunches.
-
-### P0-2 unstable release signing identity
-
-Latest runtime reports:
-
-- code signing identifier: `com.sidedock.desktop`
-- designated requirement: empty
-- team identifier: not set
-
-The release architecture must provide a stable signed H1 host identity. Runtime upgrades must not mutate the permission-owning host executable/resources unless an explicit host-generation migration is performed.
-
-### P0-3 Browser Adapter native messaging timeout
-
-Latest exact Chrome target still encountered `BROWSER_ADAPTER_TIMEOUT` after about 3.62s before falling back to vision.
-
-Required closure:
-
-- proactive command-channel health state
-- native/HTTP failover without duplicated reads
-- bounded failover latency
-- requestId idempotency preserved
-- do not wait several seconds when the native channel is already known unavailable
-
-### P0-4 Real-Mac final gate
-
-Must prove after P0-1/P0-2/P0-3:
-
-- Screen Recording enabled for the actual running canonical host
-- Accessibility enabled for the actual running canonical host
-- exact-window screenshot succeeds
-- image source window ID matches target window ID
-- no whole-screen capture
-- Terminal / Activity Monitor / Feishu / Chrome fallback paths work
-- hover/input/retract lifecycle is unchanged
-- Browser Adapter command path and fallback path both pass
-
-## Source availability blocker
-
-The connected File Library currently exposes diagnostics/build metadata and historical artifacts, but not the full v1.5.13 source/install archive. The GitHub repository was empty before this recovery checkpoint.
-
-Therefore no source-level implementation should be claimed until the canonical v1.5.13 source baseline is imported into this repository.
-
-## Next execution sequence
-
-1. Import canonical v1.5.13 source/install baseline to this repository.
-2. Freeze/sign H1 host architecture and installer invariants.
-3. Implement TCC migration/recovery UX and authoritative post-grant verification.
-4. Fix Browser Adapter command-channel health/failover latency.
-5. Run targeted automated tests for changed domains.
-6. Run affected-domain regression.
-7. Build macOS candidate and execute real-Mac permission + exact-window smoke tests.
-8. Run one final full regression + final QA.
-9. Persist QA_REPORT, BUILD_MANIFEST, hashes, release ZIP and updated TASK_STATE.
-
-No blocked item may be labeled PASS.
+Canonical release state and QA are stored under `releases/v1.5.14/` in this repository.
