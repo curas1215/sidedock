@@ -1,0 +1,104 @@
+{
+  "contract": "sidedock-task-state/1",
+  "version": "1.5.14",
+  "architecture": "IMMUTABLE_PERMISSION_HOST_H1_STABLE_LOCAL_CERT",
+  "status": "CODE_VALIDATED_REAL_MAC_V1514_STABLE_TCC_GATE_PENDING",
+  "updatedAtUtc": "2026-09-07T14:03:54Z",
+  "baseline": "v1.5.13 H1 source + real-Mac evidence: exact concrete-window binding succeeded while H1 TCC remained DENIED/TCC_GRANT_NOT_APPLIED and Browser Adapter Native command timed out",
+  "completed": [
+    "preserved v1.5.13 exact-window/PreActivationSession/Chrome-window binding path without rework",
+    "H1 freeze contract upgraded to sidedock-h1-freeze/2 for one explicit signing-identity migration",
+    "zero-cost persistent local Code Signing certificate stored in a dedicated SideDock keychain",
+    "explicit certificate-leaf-SHA1 + com.sidedock.desktop Designated Requirement",
+    "installer hard-fails empty/cdhash/ad-hoc/wrong-bundle/missing-authority Host signatures",
+    "routine updates never replace or re-sign SideDock.app and verify complete Host tree/DR continuity",
+    "normal uninstall preserves the local H1 signing identity and never runs tccutil reset",
+    "Host receipt/install receipt persist signing profile, certificate SHA1, authority, DR and privacyIdentityStable truth",
+    "running Host identity diagnoses HOST_IDENTITY_MISMATCH before HOST_SIGNING_IDENTITY_UNSTABLE",
+    "non-pixel-allowed permission states block capture before any screenshot backend invocation",
+    "Chrome Extension keeps HTTP browser-command long-poll hot even while Native Messaging is connected",
+    "Native command channel now has 450ms health probe, bounded command timeout and degraded fast-fail window",
+    "Native/HTTP failover reuses the same requestId and request cache gives exactly-once DOM-read semantics",
+    "target-Mac smoke gate directly verifies live codesign signature, DR, authority, signing certificate fingerprint and frozen Host app-tree hash",
+    "130/130 automated regression PASS after final source changes",
+    "348/348 JavaScript syntax PASS",
+    "23/23 shell syntax PASS",
+    "83/83 JSON parse PASS",
+    "static read-only/no-fullscreen/no-input-injection/no-tcc-reset/no-user-compiler safety audit PASS",
+    "final delivery root + extracted-ZIP reverse verification: manifest 884/884 hashes valid, 130/130 regression, 348 JS + 23 shell + 83 JSON syntax/parse PASS"
+  ],
+  "preservedRequirements": [
+    "pre-focus exact external target",
+    "Chrome multi-window no cross-read",
+    "Terminal/ActivityMonitor/Feishu visual fallback",
+    "known WindowID exact-first",
+    "no full-screen fallback for non-fullscreen target",
+    "Scope/Identity/Integrity separation",
+    "attachment ACK before prompt",
+    "outside click immediate collapse",
+    "typing/IME idle protection",
+    "30s Chat->Orb and Orb->Handle",
+    "external apps read-only",
+    "zero paid Apple Developer requirement",
+    "zero user-side compiler/toolchain requirement"
+  ],
+  "rootCauseClosures": {
+    "tccIdentity": {
+      "previous": "v1.5.13 H1 used ad-hoc signing and real-Mac evidence ended at TCC_GRANT_NOT_APPLIED",
+      "v1514": "persistent self-signed Code Signing identity + explicit stable DR + immutable Host after one migration",
+      "codeStatus": "CLOSED",
+      "targetMacEvidence": "PENDING"
+    },
+    "browserNativeFalseHealthy": {
+      "previous": "Native Port could remain connected while command round-trip timed out; HTTP fallback had no waiting extension long-poll",
+      "v1514": "command-level health + timeout degradation + permanently armed HTTP hot standby + shared requestId dedup",
+      "codeStatus": "CLOSED",
+      "targetMacEvidence": "PENDING"
+    }
+  },
+  "pendingRealMac": [
+    "first v1.5.14 migration creates/reuses self-signed H1 identity and macOS codesign accepts it on the target Mac",
+    "one-time v1.5.14 H1 Screen Recording + Accessibility authorization",
+    "full SideDock quit/reopen shows both permissions GRANTED for the exact running H1",
+    "second same-package install records routineRuntimeUpdate=true and hostUnchangedDuringRoutineUpdate=true",
+    "post-runtime-update TCC continuity with zero new permission prompt",
+    "WindowServer exact pixels for Activity Monitor/Terminal/Feishu and no desktop/wallpaper/wrong-window image",
+    "Chrome single/dual-window binding and Native-timeout -> HTTP hot fallback on a live Chrome instance",
+    "ChatGPT live attachment 20/20 ACK",
+    "outside-click 100/100 with P95 <=250ms",
+    "50 unique human-confirmed pre-focus sessions/snapshots",
+    "no-full-display scope gate"
+  ],
+  "automatedRegression": {
+    "total": 130,
+    "pass": 130,
+    "fail": 0,
+    "log": "logs/v1514_full_regression.log"
+  },
+  "staticQA": {
+    "jsSyntax": "348/348",
+    "shellSyntax": "23/23",
+    "jsonParse": "83/83",
+    "screenWideDesktopCapturer": 0,
+    "cgEventPostExecutable": 0,
+    "axPerformActionExecutable": 0,
+    "axSetValueExecutable": 0,
+    "tccutilResetExecutable": 0,
+    "userCompilerInstallerCalls": 0,
+    "status": "PASS",
+    "log": "logs/v1514_static_qa.log"
+  },
+  "nextAction": "target Mac: install v1.5.14 once, authorize H1 Screen Recording + Accessibility, fully quit/reopen, run the same installer a second time to prove Runtime-only continuity, then run 02_实机验收_SideDock_v1.5.14.command",
+  "truthPolicy": "Do not mark FULLY_VERIFIED_ON_TARGET_MAC until target-Mac TCC/WindowServer/Chrome/ChatGPT evidence passes.",
+  "packagingQA": {
+    "manifestContract": "sidedock-build-manifest/2",
+    "manifestFiles": 884,
+    "manifestBad": 0,
+    "releaseRootRegression": "130/130",
+    "reverseExtractRegression": "130/130",
+    "reverseJsSyntax": "348/348",
+    "reverseShellSyntax": "23/23",
+    "reverseJsonParse": "83/83",
+    "zipIntegrity": "PASS"
+  }
+}
