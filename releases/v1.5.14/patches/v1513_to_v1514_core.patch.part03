@@ -1,0 +1,187 @@
+tp_only') {
+-      nativeResult = await nativeBridge.requestCapture(options).catch((error) => ({ ok: false, code: 'NATIVE_BRIDGE_ERROR', message: String(error?.message || error) }));
+-      if (nativeResult?.ok) return { ...nativeResult, transport: 'native_messaging' };
+-    }
+-    const httpResult = await bridgeServer.requestBrowserCapture(options).catch((error) => ({ ok: false, code: 'HTTP_BROWSER_BRIDGE_ERROR', message: String(error?.message || error) }));
+-    if (httpResult?.ok) return { ...httpResult, transport: 'http_fallback', nativeFailure: nativeResult || null };
+-    return { ...(httpResult || {}), ok: false, code: httpResult?.code || nativeResult?.code || 'BROWSER_ADAPTER_OFFLINE', message: httpResult?.message || nativeResult?.message || 'Browser Adapter 未响应。', nativeFailure: nativeResult || null };
++    const requestId = String(options.requestId || `BROWSER-${Date.now()}-${Math.random().toString(16).slice(2,8)}`);
++    const shared = { ...options, requestId };
++    const http = () => bridgeServer.requestBrowserCapture(shared).catch((error) => ({ ok:false, code:'HTTP_BROWSER_BRIDGE_ERROR', message:String(error?.message || error) }));
++    if (mode === 'http_only') {
++      const result = await http();
++      return result?.ok ? { ...result, transport:'http_fallback' } : result;
++    }
++    const nativeHealthy = nativeBridge?.commandChannelHealthy?.() !== false;
++    if (!nativeHealthy) {
++      const result = await http();
++      return result?.ok ? { ...result, transport:'http_circuit_bypass', nativeFailure:{ok:false,code:'NATIVE_COMMAND_CIRCUIT_OPEN'} } : result;
++    }
++
++    // Native remains primary, but only for a short hedge window. If the port is
++    // connected yet command-stalled, arm HTTP after 350 ms instead of waiting the
++    // old 3.2s native timeout. Both transports use the SAME requestId; extension
++    // requestCache guarantees one DOM read and returns the cached result to the loser.
++    const nativePromise = nativeBridge.requestCapture({ ...shared, timeoutMs:Math.min(1400, Number(shared.timeoutMs || 2200)) })
++      .catch((error) => ({ ok:false, code:'NATIVE_BRIDGE_ERROR', message:String(error?.message || error) }));
++    const early = await Promise.race([
++      nativePromise.then((result) => ({ kind:'native', result })),
++      new Promise((resolve) => setTimeout(() => resolve({ kind:'hedge' }), 350))
++    ]);
++    if (early.kind === 'native' && early.result?.ok) return { ...early.result, transport:'native_messaging' };
++
++    const httpPromise = http();
++    if (early.kind === 'native' && !early.result?.ok) {
++      const httpResult = await httpPromise;
++      if (httpResult?.ok) return { ...httpResult, transport:'http_fast_failover', nativeFailure:early.result };
++      return { ...(httpResult || {}), ok:false, code:httpResult?.code || early.result?.code || 'BROWSER_ADAPTER_OFFLINE', message:httpResult?.message || early.result?.message || 'Browser Adapter 未响应。', nativeFailure:early.result };
++    }
++
++    const winner = await new Promise((resolve) => {
++      let nativeResult = null, httpResult = null, settled = 0;
++      const finish = (transport, result) => {
++        settled += 1;
++        if (transport === 'native') nativeResult = result; else httpResult = result;
++        if (result?.ok) return resolve({ transport, result, nativeResult, httpResult });
++        if (settled === 2) resolve({ transport:'failed', result:httpResult || nativeResult, nativeResult, httpResult });
++      };
++      nativePromise.then((r) => finish('native', r));
++      httpPromise.then((r) => finish('http', r));
++    });
++    if (winner.result?.ok) {
++      return winner.transport === 'native'
++        ? { ...winner.result, transport:'native_messaging_hedged' }
++        : { ...winner.result, transport:'http_hedged_fallback', nativeFailure:winner.nativeResult || null };
++    }
++    return { ...(winner.result || {}), ok:false, code:winner.httpResult?.code || winner.nativeResult?.code || 'BROWSER_ADAPTER_OFFLINE', message:winner.httpResult?.message || winner.nativeResult?.message || 'Browser Adapter 未响应。', nativeFailure:winner.nativeResult || null };
+   });
+ 
+   const permissionStatus = async () => {
+@@ -2226,11 +2267,11 @@
+     if (channel.composerFound) return { ...channel, ok:true, attachmentReady:false, message:'ChatGPT 输入区已就绪，但视觉附件 file input 未检测到。' };
+     return { ...channel, ok:false, message:channel.message || '未确认 ChatGPT 输入区/登录会话。' };
+   };
+-  selfTestRunner = new SelfTestRunner({version:'1.5.13',contextEngine,nativeBridge,httpBridge:bridgeServer,configStore,permissionStatus,chatStatus,feishuClient,browserTargetRegistry,windowRegistry,liveTargetService,requestTargetStore,pinnedTargetStore,targetContinuity,preActivationLatchService,preActivationSessionService,nativeDockController,activationVisualCaptureService,activationVisualSnapshotStore});
++  selfTestRunner = new SelfTestRunner({version:'1.5.14',contextEngine,nativeBridge,httpBridge:bridgeServer,configStore,permissionStatus,chatStatus,feishuClient,browserTargetRegistry,windowRegistry,liveTargetService,requestTargetStore,pinnedTargetStore,targetContinuity,preActivationLatchService,preActivationSessionService,nativeDockController,activationVisualCaptureService,activationVisualSnapshotStore});
+   startLifecycleWatchdog();
+-  diagnosticsExporter = new DiagnosticsExporter({ userDataDir: app.getPath('userData'), version:'1.5.13',contextEngine, transactionLog, configStore, nativeBridge, httpBridge: bridgeServer, browserTargetRegistry, permissionStatus, buildManifestPath: runtimeBuildManifestPath() });
++  diagnosticsExporter = new DiagnosticsExporter({ userDataDir: app.getPath('userData'), version:'1.5.14',contextEngine, transactionLog, configStore, nativeBridge, httpBridge: bridgeServer, browserTargetRegistry, permissionStatus, buildManifestPath: runtimeBuildManifestPath() });
+ 
+-  // v1.5.13 restart recovery is passive-only. A restart can refresh the TCC
++  // v1.5.14 restart recovery is passive-only. A restart can refresh the TCC
+   // state, but it never triggers a screenshot probe by itself.
+   if (restartRecoveryRequested) {
+     setTimeout(() => permissionCoordinator?.refreshPassive?.().then((snapshot)=>broadcastPermissionSnapshot(snapshot)).catch(()=>null), 800);
+--- a/desktop/app/src/bridge/native-server.js
++++ b/desktop/app/src/bridge/native-server.js
+@@ -32,7 +32,7 @@
+ }
+ 
+ class NativeBridgeServer {
+-  constructor({ version = '1.5.13', extensionId = DEFAULT_EXTENSION_ID, onBrowserTarget = null, onExtensionHello = null } = {}) {
++  constructor({ version = '1.5.14', extensionId = DEFAULT_EXTENSION_ID, onBrowserTarget = null, onExtensionHello = null } = {}) {
+     this.version = version;
+     this.extensionId = extensionId;
+     this.expectedOrigin = `chrome-extension://${extensionId}`;
+@@ -46,6 +46,14 @@
+     this.pairingToken = '';
+     this.onBrowserTarget = typeof onBrowserTarget === 'function' ? onBrowserTarget : null;
+     this.onExtensionHello = typeof onExtensionHello === 'function' ? onExtensionHello : null;
++    this.lastCommandStartedAt = 0;
++    this.lastCommandCompletedAt = 0;
++    this.lastCommandSuccessAt = 0;
++    this.lastCommandFailureAt = 0;
++    this.lastCommandLatencyMs = 0;
++    this.lastCommandCode = '';
++    this.consecutiveCommandFailures = 0;
++    this.commandCircuitOpenUntil = 0;
+   }
+ 
+   start() {
+@@ -136,7 +144,20 @@
+       if (pending) {
+         clearTimeout(pending.timer);
+         this.pending.delete(requestId);
+-        pending.resolve(message.result || message);
++        const result = message.result || message;
++        this.lastCommandCompletedAt = Date.now();
++        this.lastCommandLatencyMs = Math.max(0, this.lastCommandCompletedAt - Number(pending.createdAt || this.lastCommandCompletedAt));
++        this.lastCommandCode = String(result?.code || (result?.ok === false ? 'NATIVE_COMMAND_FAILED' : 'OK'));
++        if (result?.ok === false) {
++          this.lastCommandFailureAt = this.lastCommandCompletedAt;
++          this.consecutiveCommandFailures += 1;
++          if (this.consecutiveCommandFailures >= 2) this.commandCircuitOpenUntil = Date.now() + 5000;
++        } else {
++          this.lastCommandSuccessAt = this.lastCommandCompletedAt;
++          this.consecutiveCommandFailures = 0;
++          this.commandCircuitOpenUntil = 0;
++        }
++        pending.resolve(result);
+       }
+     }
+   }
+@@ -146,19 +167,42 @@
+     try { client.write(`${JSON.stringify(payload)}\n`); return true; } catch { return false; }
+   }
+ 
++  commandChannelHealthy() {
++    const connected = Boolean(this.primary && !this.primary.destroyed && this.primary._authorized);
++    const circuitOpen = Date.now() < Number(this.commandCircuitOpenUntil || 0);
++    return connected && !circuitOpen;
++  }
++
+   request(type, payload = {}, timeoutMs = 2600) {
+     const client = this.primary;
+     if (!client || client.destroyed || !client._authorized) return Promise.resolve({ ok: false, code: 'NATIVE_ADAPTER_OFFLINE', message: 'Chrome Native Messaging 通道未连接。' });
++    if (Date.now() < Number(this.commandCircuitOpenUntil || 0) && type !== 'ping') {
++      return Promise.resolve({ ok: false, code: 'NATIVE_COMMAND_CIRCUIT_OPEN', message: 'Native Messaging 命令通道最近连续失败，已短暂旁路到 HTTP。' });
++    }
+     const requestId = payload.requestId || `NATIVE-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
++    const startedAt = Date.now();
++    this.lastCommandStartedAt = startedAt;
+     return new Promise((resolve) => {
+       const timer = setTimeout(() => {
+         this.pending.delete(requestId);
++        this.lastCommandCompletedAt = Date.now();
++        this.lastCommandFailureAt = this.lastCommandCompletedAt;
++        this.lastCommandLatencyMs = Math.max(0, this.lastCommandCompletedAt - startedAt);
++        this.lastCommandCode = 'NATIVE_ADAPTER_TIMEOUT';
++        this.consecutiveCommandFailures += 1;
++        this.commandCircuitOpenUntil = Date.now() + 5000;
+         resolve({ ok: false, code: 'NATIVE_ADAPTER_TIMEOUT', message: 'Browser Adapter Native Messaging 超时。' });
+-      }, Math.max(700, Math.min(10000, Number(timeoutMs) || 2600)));
+-      this.pending.set(requestId, { resolve, timer, type, createdAt: Date.now() });
++      }, Math.max(350, Math.min(5000, Number(timeoutMs) || 2600)));
++      this.pending.set(requestId, { resolve, timer, type, createdAt: startedAt });
+       if (!this.send(client, { type, requestId, ...payload })) {
+         clearTimeout(timer);
+         this.pending.delete(requestId);
++        this.lastCommandCompletedAt = Date.now();
++        this.lastCommandFailureAt = this.lastCommandCompletedAt;
++        this.lastCommandLatencyMs = Math.max(0, this.lastCommandCompletedAt - startedAt);
++        this.lastCommandCode = 'NATIVE_ADAPTER_SEND_FAILED';
++        this.consecutiveCommandFailures += 1;
++        this.commandCircuitOpenUntil = Date.now() + 5000;
+         resolve({ ok: false, code: 'NATIVE_ADAPTER_SEND_FAILED', message: 'Browser Adapter Native Messaging 发送失败。' });
+       }
+     });
+@@ -182,6 +226,16 @@
+       lastHello: this.lastHello,
+       lastError: this.lastError,
+       pending: this.pending.size,
++      commandHealthy: this.commandChannelHealthy(),
++      commandCircuitOpen: Date.now() < Number(this.commandCircuitOpenUntil || 0),
++      commandCircuitOpenUntil: this.commandCircuitOpenUntil,
++      lastCommandStartedAt: this.lastCommandStartedAt,
++      lastCommandCompletedAt: this.lastCommandCompletedAt,
++      lastCommandSuccessAt: this.lastCommandSuccessAt,
++      lastCommandFailureAt: this.lastCommandFailureAt,
++      lastCommandLatencyMs: this.lastCommandLatencyMs,
++      lastCommandCode: this.lastCommandCode,
++      consecutiveCommandFailures: this.consecutiveCommandFailures,
+       transport: 'native_messaging'
+     };
+   }
+--- a/chrome_extension/background.js
++++ b/chrome_extension/background.js
+@@ -723,7 +723
