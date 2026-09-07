@@ -1,0 +1,13 @@
+const fs=require('fs'),path=require('path'),assert=require('assert');
+const root=path.join(__dirname,'../../..');
+const install=fs.readFileSync(path.join(root,'desktop/install.command'),'utf8');
+const setMatch=install.match(/HOST_STABLE_REQUIREMENT='([^']+)'/);
+const exprMatch=install.match(/HOST_STABLE_TEST_REQUIREMENT='([^']+)'/);
+assert(setMatch&&exprMatch,'both signing requirement forms must exist');
+assert(setMatch[1].startsWith('designated => '),'internal -r requirement set must carry designated =>');
+assert(!exprMatch[1].includes('designated =>'),'external -R test expression must not carry designated =>');
+assert(install.includes('codesign --force --sign - --requirements "=$HOST_STABLE_REQUIREMENT"'),'signing must embed the typed requirement set');
+assert(install.includes('codesign --verify --deep --strict -R "=$HOST_STABLE_TEST_REQUIREMENT"'),'verification must test the untyped expression');
+assert(!install.includes('-R "=$HOST_STABLE_REQUIREMENT"'),'regression: never pass designated => requirement set to codesign -R');
+assert(install.includes('INSTALLER_REVISION="R2"'),'hotfix revision must be traceable');
+console.log('PASS v1.5.14 R2 codesign requirement-set vs test-expression separation');
