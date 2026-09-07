@@ -1,0 +1,124 @@
+--- a/desktop/install.command
++++ b/desktop/install.command
+@@ -2,11 +2,13 @@
+ set -euo pipefail
+ 
+ ELECTRON_VERSION="44.2.0"
+-SIDEDOCK_VERSION="1.5.13"
+-BUILD_NUMBER="1513"
++SIDEDOCK_VERSION="1.5.14"
++BUILD_NUMBER="1514"
+ HOST_ABI="1"
+ HOST_GENERATION="H1"
+ FREEZE_CONTRACT="sidedock-h1-freeze/1"
++HOST_IDENTITY_SCHEME="AD_HOC_STABLE_CUSTOM_DR_V1"
++HOST_STABLE_REQUIREMENT='designated => identifier "com.sidedock.desktop" and info[CFBundleIdentifier] = "com.sidedock.desktop"'
+ APP_NAME="SideDock"
+ BUNDLE_ID="com.sidedock.desktop"
+ EXTENSION_ID="bkmennidelepccpaiijojnofkkklhfec"
+@@ -25,12 +27,12 @@
+ HOST_RECEIPT="$SUPPORT_ROOT/HOST_RECEIPT.json"
+ H1_AUTH_STATUS="$SUPPORT_ROOT/H1_AUTHORIZATION_STATUS.json"
+ IDENTITY_STATUS="$SUPPORT_ROOT/UPGRADE_IDENTITY_STATUS.json"
+-INSTALL_RECEIPT="$SUPPORT_ROOT/INSTALL_RECEIPT_v1513.json"
++INSTALL_RECEIPT="$SUPPORT_ROOT/INSTALL_RECEIPT_v1514.json"
+ EXT_DIR="$SUPPORT_ROOT/ChromeExtension"
+ NATIVE_ROOT="$SUPPORT_ROOT/NativeHost"
+ NATIVE_WRAPPER="$NATIVE_ROOT/sidedock_native_host"
+ 
+-TMP_DIR="$(mktemp -d /tmp/sidedock-v1513-h1-install.XXXXXX)"
++TMP_DIR="$(mktemp -d /tmp/sidedock-v1514-h1-install.XXXXXX)"
+ STAGE_APP="$INSTALL_ROOT/.${APP_NAME}.app.stage.$$"
+ BACKUP_APP="$INSTALL_ROOT/.${APP_NAME}.app.backup.$$"
+ STAGE_RUNTIME="$TMP_DIR/runtime-stage"
+@@ -44,12 +46,13 @@
+ STAGE_HOST_RECEIPT="$TMP_DIR/HOST_RECEIPT.json"
+ STAGE_H1_AUTH_STATUS="$TMP_DIR/H1_AUTHORIZATION_STATUS.json"
+ STAGE_IDENTITY="$TMP_DIR/UPGRADE_IDENTITY_STATUS.json"
+-STAGE_RECEIPT="$TMP_DIR/INSTALL_RECEIPT_v1513.json"
++STAGE_RECEIPT="$TMP_DIR/INSTALL_RECEIPT_v1514.json"
+ BACKUP_SUPPORT="$TMP_DIR/support-backup"
+ BACKUP_HOSTS="$TMP_DIR/host-backups"
+ COMMIT_STARTED=0
+ INSTALL_COMPLETE=0
+ HOST_MIGRATION=0
++HOST_IDENTITY_REPAIR=0
+ HAD_TARGET_APP=0
+ HAD_TARGET_RUNTIME=0
+ 
+@@ -73,7 +76,7 @@
+   fi
+   rm -rf "$TARGET_RUNTIME"
+   if [ "$HAD_TARGET_RUNTIME" -eq 1 ] && [ -d "$BACKUP_RUNTIME" ]; then mkdir -p "$RUNTIME_ROOT"; mv "$BACKUP_RUNTIME" "$TARGET_RUNTIME"; fi
+-  for name in active-runtime.json previous-runtime.json HOST_RECEIPT.json H1_AUTHORIZATION_STATUS.json UPGRADE_IDENTITY_STATUS.json INSTALL_RECEIPT_v1513.json ChromeExtension NativeHost; do
++  for name in active-runtime.json previous-runtime.json HOST_RECEIPT.json H1_AUTHORIZATION_STATUS.json UPGRADE_IDENTITY_STATUS.json INSTALL_RECEIPT_v1514.json ChromeExtension NativeHost; do
+     [ -f "$BACKUP_SUPPORT/$name.exists" ] && managed_restore "$SUPPORT_ROOT/$name" "$name"
+   done
+   if [ -d "$BACKUP_HOSTS" ]; then
+@@ -108,11 +111,24 @@
+   EXISTING_FREEZE_CONTRACT="$(/usr/bin/sed -n 's/.*"freezeContract"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$HOST_MARKER" | /usr/bin/head -n1)"
+ fi
+ if [ "$EXISTING_HOST_ABI" = "$HOST_ABI" ] && [ "$EXISTING_HOST_GENERATION" = "$HOST_GENERATION" ] && [ "$EXISTING_FREEZE_CONTRACT" = "$FREEZE_CONTRACT" ] && [ -x "$TARGET_APP/Contents/MacOS/Electron" ]; then HOST_MIGRATION=0; else HOST_MIGRATION=1; fi
+-if [ "$HOST_MIGRATION" -eq 1 ] && [ -f "$H1_AUTH_STATUS" ] && /usr/bin/grep -Eq '"authorized"[[:space:]]*:[[:space:]]*true' "$H1_AUTH_STATUS"; then
++PRE_HOST_REQUIREMENT="$(codesign_requirement "$TARGET_APP")"
++# v1.5.14 one-time repair: v1.5.13 H1 was ad-hoc signed without a stable custom
++# designated requirement. TCC can therefore keep an obsolete identity record even
++# when the visible System Settings toggle is enabled. Repair only weak H1 identity;
++# once the stable requirement is present, later installers are runtime-only again.
++if [ "$HOST_MIGRATION" -eq 0 ]; then
++  case "$PRE_HOST_REQUIREMENT" in
++    *'identifier "com.sidedock.desktop"'*'info[CFBundleIdentifier]'* ) : ;;
++    * ) HOST_MIGRATION=1; HOST_IDENTITY_REPAIR=1; echo "INFO: weak v1.5.13 H1 signing identity detected; performing one-time stable designated-requirement repair." ;;
++  esac
++fi
++if [ "$HOST_MIGRATION" -eq 1 ] && [ -f "$H1_AUTH_STATUS" ] && /usr/bin/grep -Eq '"authorized"[[:space:]]*:[[:space:]]*true' "$H1_AUTH_STATUS" && [ "$HOST_IDENTITY_REPAIR" -ne 1 ]; then
+   echo "FATAL: HOST_MIGRATION_REQUIRED: an authorized H1 Host is already recorded; ordinary installers must never replace it."
+   exit 1
+ fi
+-PRE_HOST_REQUIREMENT="$(codesign_requirement "$TARGET_APP")"
++if [ "$HOST_IDENTITY_REPAIR" -eq 1 ] && [ -f "$H1_AUTH_STATUS" ] && /usr/bin/grep -Eq '"authorized"[[:space:]]*:[[:space:]]*true' "$H1_AUTH_STATUS"; then
++  echo "WARN: v1.5.14 is intentionally replacing the weak H1 code-sign identity once. macOS privacy permission must be granted once to the repaired stable H1 identity."
++fi
+ PRE_HOST_BOOTSTRAP_SHA="$(sha256_file "$TARGET_APP/Contents/Resources/app/bootstrap.js")"
+ PRE_HOST_ABI_SHA="$(sha256_file "$HOST_MARKER")"
+ PRE_HOST_TREE_SHA="$(tree_fingerprint "$TARGET_APP")"
+@@ -163,7 +179,12 @@
+   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$PLIST" || true
+   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SIDEDOCK_VERSION" "$PLIST" || true
+   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST" || true
+-  /usr/bin/codesign --force --deep --sign - "$STAGE_APP"; /usr/bin/codesign --verify --deep --strict "$STAGE_APP"
++  /usr/bin/codesign --force --deep --sign - "$STAGE_APP"
++  /usr/bin/codesign --force --sign - --requirements "=$HOST_STABLE_REQUIREMENT" "$STAGE_APP"
++  /usr/bin/codesign --verify --deep --strict "$STAGE_APP"
++  /usr/bin/codesign --verify --deep --strict -R "=$HOST_STABLE_REQUIREMENT" "$STAGE_APP"
++  STAGE_REQ="$(codesign_requirement "$STAGE_APP")"
++  case "$STAGE_REQ" in *'identifier "com.sidedock.desktop"'*'info[CFBundleIdentifier]'*) : ;; *) echo "FATAL: stable H1 designated requirement was not applied."; exit 1;; esac
+   NODE_BIN="$STAGE_APP/Contents/MacOS/Electron"; APP_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST" 2>/dev/null || echo Electron)"
+ else
+   echo "  Host ABI ${HOST_ABI} already installed: routine update will NOT modify SideDock.app."
+@@ -202,6 +223,7 @@
+ HOST_MANIFEST_SHA="$(sha256_file "$STAGE_HOST_MANIFEST")"
+ 
+ CURRENT_REQ="$( [ "$HOST_MIGRATION" -eq 1 ] && codesign_requirement "$STAGE_APP" || codesign_requirement "$TARGET_APP" )"
++case "$CURRENT_REQ" in *'identifier "com.sidedock.desktop"'*'info[CFBundleIdentifier]'*) : ;; *) echo "FATAL: H1 stable designated requirement missing after staging."; exit 1;; esac
+ HOST_BOOTSTRAP_SHA="$( [ "$HOST_MIGRATION" -eq 1 ] && sha256_file "$STAGE_APP/Contents/Resources/app/bootstrap.js" || sha256_file "$TARGET_APP/Contents/Resources/app/bootstrap.js" )"
+ HOST_ABI_SHA="$( [ "$HOST_MIGRATION" -eq 1 ] && sha256_file "$STAGE_APP/Contents/Resources/app/HOST_ABI.json" || sha256_file "$TARGET_APP/Contents/Resources/app/HOST_ABI.json" )"
+ HOST_RESOURCES_SHA="$( [ "$HOST_MIGRATION" -eq 1 ] && tree_fingerprint "$STAGE_APP/Contents/Resources/app" || tree_fingerprint "$TARGET_APP/Contents/Resources/app" )"
+@@ -216,7 +238,7 @@
+   cp "$HOST_RECEIPT" "$STAGE_HOST_RECEIPT"
+ else
+ cat > "$STAGE_HOST_RECEIPT" <<JSON
+-{"contract":"sidedock-host-receipt/3","hostAbi":${HOST_ABI},"hostGeneration":"${HOST_GENERATION}","freezeContract":"${FREEZE_CONTRACT}","hostVersion":"1.5.13-H1","bundleId":"${BUNDLE_ID}","canonicalAppPath":"$(json_escape "$CANONICAL_TARGET_APP")","executablePath":"$(json_escape "$CANONICAL_TARGET_APP/Contents/MacOS/$APP_EXECUTABLE")","executableSha256":"${HOST_EXECUTABLE_SHA}","bootstrapSha256":"${HOST_BOOTSTRAP_SHA}","hostAbiSha256":"${HOST_ABI_SHA}","hostResourcesSha256":"${HOST_RESOURCES_SHA}","appTreeSha256":"${HOST_APP_TREE_SHA}","codeSigningIdentifier":"$(json_escape "$HOST_CODE_IDENTIFIER")","cdHash":"$(json_escape "$HOST_CDHASH")","designatedRequirement":"$(json_escape "$CURRENT_REQ")","hostFingerprint":"${HOST_FINGERPRINT}","hostFrozen":true,"routineUpdateMayReplaceAppBundle":false,"recordedAtUtc":"$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"}
++{"contract":"sidedock-host-receipt/3","hostAbi":${HOST_ABI},"hostGeneration":"${HOST_GENERATION}","freezeContract":"${FREEZE_CONTRACT}","hostVersion":"1.5.14-H1","bundleId":"${BUNDLE_ID}","canonicalAppPath":"$(json_escape "$CANONICAL_TARGET_APP")","executablePath":"$(json_escape "$CANONICAL_TARGET_APP/Contents/MacOS/$APP_EXECUTABLE")","executableSha256":"${HOST_EXECUTABLE_SHA}","bootstrapSha256":"${HOST_BOOTSTRAP_SHA}","hostAbiSha256":"${HOST_ABI_SHA}","hostResourcesSha256":"${HOST_RESOURCES_SHA}","appTreeSha256":"${HOST_APP_TREE_SHA}","codeSigningIdentifier":"$(json_escape "$HOST_CODE_IDENTIFIER")","cdHash":"$(json_escape "$HOST_CDHASH")","designatedRequirement":"$(json_escape "$CURRENT_REQ")","hostIdentityScheme":"${HOST_IDENTITY_SCHEME}","designatedRequirementStable":true,"hostFingerprint":"${HOST_FINGERPRINT}","hostFrozen":true,"routineUpdateMayReplaceAppBundle":false,"recordedAtUtc":"$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"}
+ JSON
+ fi
+ if [ "$HOST_MIGRATION" -eq 1 ]; then
+@@ -225,17 +247,17 @@
+ JSON
+ fi
+ cat > "$STAGE_IDENTITY" <<JSON
+-{"contract":"sidedock-upgrade-identity/3","version":"${SIDEDOCK_VERSION}","build":${BUILD_NUMBER},"hostAbi":${HOST_ABI},"hostGeneration":"${HOST_GENERATION}","freezeContract":"${FREEZE_CONTRACT}","hostMigration":$([ "$HOST_MIGRATION" -eq 1 ] && printf true || printf false),"routineRuntimeUpdate":$([ "$HOST_MIGRATION" -eq 0 ] && printf true || printf false),"previousVersion":"${PREVIOUS_VERSION}","signMode":"AD_HOC_FREE_H1_FROZEN_HOST","hostDesignatedRequirement":"$(json_escape "$CURRENT_REQ")","hostBootstrapSha256":"${HOST_BOOTSTRAP_SHA}","hostResourcesSha256":"${HOST_RESOURCES_SHA}","hostAppTreeSha256":"${HOST_APP_TREE_SHA}","hostUnchangedDuringRoutineUpdate":$([ "$HOST_MIGRATION" -eq 0 ] && printf true || printf false),"preFocusController":"ELECTRON_NONACTIVATING_PANEL","windowMetadataProvider":"JXA_CGWINDOWLIST_CFMAKECOLLECTABLE","exactWindowCapture":"H1_HOST_API_EXACT_WINDOW","requiresPaidAppleDeveloper":false,"requiresXcode":false,"requiresCommandLineTools":false,"nativeCompileAttempted":false}
++{"contract":"sidedock-upgrade-identity/3","version":"${SIDEDOCK_VERSION}","build":${BUILD_NUMBER},"hostAbi":${HOST_ABI},"hostGeneration":"${HOST_GENERATION}","freezeContract":"${FREEZE_CONTRACT}","hostMigration":$([ "$HOST_MIGRATION" -eq 1 ] && printf true || printf false),"routineRuntimeUpdate":$([ "$HOST_MIGRATION" -eq 0 ] && printf true || printf false),"previousVersion":"${PREVIOUS_VERSION}","signMode":"${HOST_IDENTITY_SCHEME}","hostIdentityRepair":$([ "$HOST_IDENTITY_REPAIR" -eq 1 ] && printf true || printf false),"designatedRequirementStable":true,"hostDesignatedRequirement":"$(json_escape "$CURRENT_REQ")","hostBootstrapSha256":"${HOST_BOOTSTRAP_SHA}","hostResourcesSha256":"${HOST_RESOURCES_SHA}","hostAppTreeSha256":"${HOST_APP_TREE_SHA}","hostUnchangedDuringRoutineUpdate":$([ "$HOST_MIGRATION" -eq 0 ] && printf true || printf false),"preFocusController":"ELECTRON_NONACTIVATING_PANEL","windowMetadataProvider":"JXA_CGWINDOWLIST_CFMAKECOLLECTABLE","exactWindowCapture":"H1_HOST_API_EXACT_WINDOW","requiresPaidAppleDeveloper":false,"requiresXcode":false,"requiresCommandLineTools":false,"nativeCompileAttempted":false}
+ JSON
+ cat > "$STAGE_RECEIPT" <<JSON
+-{"contract":"sidedock-install-receipt/6","version":"${SIDEDOCK_VERSION}","build":${BUILD_NUMBER},"hostAbi":${HOST_ABI},"hostGeneration":"${HOST_GENERATION}","hostMigration":$([ "$HOST_MIGRATION" -eq 1 ] && printf true || printf false),"canonicalAppPath":"$(json_escape "$CANONICAL_TARGET_APP")","hostExecutableSha256":"${HOST_EXECUTABLE_SHA}","hostFingerprint":"${HOST_FINGERPRINT}","hostAppTreeSha256":"${HOST_APP_TREE_SHA}","hostDesignatedRequirement":"$(json_escape "$CURRENT_REQ")","runtimePath":"${TARGET_RUNTIME}","electronSource":"${ELECTRON_SOURCE}","architecture":"${ARCH}","installedAtUtc":"$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)","runtimeMainSha256":"${MAIN_SHA}","runtimeAppTreeSha256":"${RUNTIME_APP_TREE_SHA}","nativeHostSha256":"${NATIVE_SHA}","chromeExtensionManifestSha256":"${EXT_MANIFEST_SHA}","nativeWrapperSha256":"${NATIVE_WRAPPER_SHA}","nativeMessagingManifestSha256":"${HOST_MANIFEST_SHA}","preFocusController":"ELECTRON_NONACTIV
