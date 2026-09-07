@@ -1,0 +1,53 @@
+--- a/desktop/install.command
++++ b/desktop/install.command
+@@ -9,6 +9,8 @@
+ FREEZE_CONTRACT="sidedock-h1-freeze/1"
+ HOST_IDENTITY_SCHEME="AD_HOC_STABLE_CUSTOM_DR_V1"
+ HOST_STABLE_REQUIREMENT='designated => identifier "com.sidedock.desktop" and info[CFBundleIdentifier] = "com.sidedock.desktop"'
++HOST_STABLE_TEST_REQUIREMENT='identifier "com.sidedock.desktop" and info[CFBundleIdentifier] = "com.sidedock.desktop"'
++INSTALLER_REVISION="R2"
+ APP_NAME="SideDock"
+ BUNDLE_ID="com.sidedock.desktop"
+ EXTENSION_ID="bkmennidelepccpaiijojnofkkklhfec"
+@@ -157,6 +159,9 @@
+ if [ -f "$ACTIVE_RUNTIME" ]; then cp "$ACTIVE_RUNTIME" "$STAGE_PREVIOUS"; else printf '%s\n' '{"contract":"sidedock-active-runtime/2","version":"","hostAbi":1,"hostGeneration":"H1","runtimePath":""}' > "$STAGE_PREVIOUS"; fi
+ 
+ printf '[2/9] Preparing immutable Permission Host...\n'
++# codesign -r embeds an internal requirement SET and therefore needs the
++# "designated =>" type prefix. codesign -R tests one requirement expression
++# and MUST NOT receive that prefix (Apple TN3127). Keep these variables split.
+ if [ "$HOST_MIGRATION" -eq 1 ]; then
+@@ -182,7 +187,7 @@
+   /usr/bin/codesign --force --deep --sign - "$STAGE_APP"
+   /usr/bin/codesign --force --sign - --requirements "=$HOST_STABLE_REQUIREMENT" "$STAGE_APP"
+   /usr/bin/codesign --verify --deep --strict "$STAGE_APP"
+-  /usr/bin/codesign --verify --deep --strict -R "=$HOST_STABLE_REQUIREMENT" "$STAGE_APP"
++  /usr/bin/codesign --verify --deep --strict -R "=$HOST_STABLE_TEST_REQUIREMENT" "$STAGE_APP"
+@@ -274,7 +279,7 @@
+ printf '[7/9] Verify immutable Host + active runtime...\n'
+ /usr/bin/codesign --verify --deep --strict "$TARGET_APP"
+-/usr/bin/codesign --verify --deep --strict -R "=$HOST_STABLE_REQUIREMENT" "$TARGET_APP"
++/usr/bin/codesign --verify --deep --strict -R "=$HOST_STABLE_TEST_REQUIREMENT" "$TARGET_APP"
+--- a/tests/test_v1514_stable_h1_identity_repair.js
++++ b/tests/test_v1514_stable_h1_identity_repair.js
+@@ -5,19 +5,21 @@
+ for(const token of [
+   'HOST_IDENTITY_SCHEME="AD_HOC_STABLE_CUSTOM_DR_V1"',
+   'HOST_STABLE_REQUIREMENT=',
++  'HOST_STABLE_TEST_REQUIREMENT=',
+   'designated => identifier "com.sidedock.desktop"',
+   'info[CFBundleIdentifier] = "com.sidedock.desktop"',
+   'HOST_IDENTITY_REPAIR=1',
+   'weak v1.5.13 H1 signing identity detected',
+   'codesign --force --deep --sign -',
+   'codesign --force --sign - --requirements "=$HOST_STABLE_REQUIREMENT"',
+-  'codesign --verify --deep --strict -R "=$HOST_STABLE_REQUIREMENT"',
++  'codesign --verify --deep --strict -R "=$HOST_STABLE_TEST_REQUIREMENT"',
+   'designatedRequirementStable',
+   'hostIdentityRepair',
+   'hostIdentityScheme'
+ ]) assert(install.includes(token),token);
+ assert(install.includes('an authorized H1 Host is already recorded; ordinary installers must never replace it.'),'ordinary authorized H1 migration protection must remain');
+ assert(install.includes('[ "$HOST_IDENTITY_REPAIR" -ne 1 ]'),'only the explicit weak-identity repair may bypass the ordinary H1 migration refusal');
++assert(!install.includes('-R "=$HOST_STABLE_REQUIREMENT"'),'codesign -R must never receive a requirement-set prefix containing designated =>');
+ assert(!/tccutil\s+reset/i.test(install),'installer must never reset user TCC decisions');
