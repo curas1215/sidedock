@@ -1,0 +1,160 @@
++function compareInstalledIdentity(current = {}, receipt = {}) {
++  const receiptPath = String(receipt.canonicalAppPath || receipt.appBundlePath || '');
++  const pathMatch = !receiptPath || realpath(receiptPath) === realpath(current.appBundlePath || '');
++  const bundleMatch = !receipt.bundleId || String(receipt.bundleId) === String(current.bundleId || '');
++  const abiMatch = !receipt.hostAbi || Number(receipt.hostAbi) === Number(current.hostAbi || 0);
++  const generationMatch = !receipt.hostGeneration || String(receipt.hostGeneration) === String(current.hostGeneration || '');
++  const bootstrapMatch = !receipt.bootstrapSha256 || String(receipt.bootstrapSha256) === String(current.bootstrapSha256 || '');
++  const hostResourcesMatch = !receipt.hostResourcesSha256 || String(receipt.hostResourcesSha256) === String(current.hostResourcesSha256 || '');
++  const executableMatch = !receipt.executableSha256 || String(receipt.executableSha256) === String(current.executableSha256 || '');
++  const requirementMatch = !receipt.designatedRequirement || String(receipt.designatedRequirement) === String(current.designatedRequirement || '');
++  const fingerprintMatch = !receipt.hostFingerprint || String(receipt.hostFingerprint) === String(current.hostFingerprint || '');
++  const same = pathMatch && bundleMatch && abiMatch && generationMatch && bootstrapMatch && hostResourcesMatch && executableMatch && requirementMatch && fingerprintMatch;
++  return { same, pathMatch, bundleMatch, abiMatch, generationMatch, bootstrapMatch, hostResourcesMatch, executableMatch, requirementMatch, fingerprintMatch };
++}
++
++class RunningHostIdentityService {
++  constructor({ supportRoot = '', execPathProvider = () => process.execPath, pidProvider = () => process.pid, ppidProvider = () => process.ppid, platform = process.platform } = {}) {
++    this.supportRoot = supportRoot || process.env.SIDEDOCK_SUPPORT_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'SideDock');
++    this.execPathProvider = execPathProvider;
++    this.pidProvider = pidProvider;
++    this.ppidProvider = ppidProvider;
++    this.platform = platform;
++    this.last = null;
++  }
++
++  receipt() {
++    return readJson(path.join(this.supportRoot, 'HOST_RECEIPT.json')) || readJson(path.join(this.supportRoot, 'INSTALL_RECEIPT_v1514.json')) || readJson(path.join(this.supportRoot, 'INSTALL_RECEIPT_v1513.json')) || readJson(path.join(this.supportRoot, 'INSTALL_RECEIPT_v1512.json')) || {};
++  }
++  runtimePointer() { return readJson(path.join(this.supportRoot, 'active-runtime.json')) || {}; }
++
++  async snapshot() {
++    const execPath = realpath(this.execPathProvider());
++    const appBundlePath = deriveAppBundlePath(execPath);
++    const hostAppRoot = appBundlePath ? path.join(appBundlePath, 'Contents', 'Resources', 'app') : '';
++    const abi = readJson(hostAppRoot ? path.join(hostAppRoot, 'HOST_ABI.json') : '') || {};
++    const active = this.runtimePointer();
++    let designatedRequirement = '';
++    let codeSigningIdentifier = '';
++    let cdHash = '';
++    let teamIdentifier = '';
++    if (this.platform === 'darwin' && appBundlePath) {
++      const req = await run('/usr/bin/codesign', ['-d', '-r-', appBundlePath]);
++      designatedRequirement = ((req.stderr || req.stdout).match(/^designated => (.+)$/m) || [])[1] || '';
++      const detail = await run('/usr/bin/codesign', ['-dv', '--verbose=4', appBundlePath]);
++      const parsed = parseCodesign(detail.stderr || detail.stdout);
++      codeSigningIdentifier = parsed.identifier; cdHash = parsed.cdHash; teamIdentifier = parsed.teamIdentifier;
++    }
++    const bootstrapPath = hostAppRoot ? path.join(hostAppRoot, 'bootstrap.js') : '';
++    const abiPath = hostAppRoot ? path.join(hostAppRoot, 'HOST_ABI.json') : '';
++    const executableSha256 = sha256File(execPath);
++    const bootstrapSha256 = sha256File(bootstrapPath);
++    const hostAbiSha256 = sha256File(abiPath);
++    const hostResourcesSha256 = hostAppRoot ? sha256Directory(hostAppRoot) : '';
++    const hostFingerprint = sha256Text(JSON.stringify({
++      appBundlePath:realpath(appBundlePath || ''), bundleId:String(abi.bundleId || 'com.sidedock.desktop'), hostAbi:Number(abi.hostAbi || process.env.SIDEDOCK_HOST_ABI || 0), hostGeneration:String(abi.hostGeneration || process.env.SIDEDOCK_HOST_GENERATION || ''), freezeContract:String(abi.freezeContract || ''), executableSha256, bootstrapSha256, hostAbiSha256, hostResourcesSha256, designatedRequirement
++    }));
++    const current = {
++      pid:Number(this.pidProvider() || 0), ppid:Number(this.ppidProvider() || 0), execPath, appBundlePath:realpath(appBundlePath || ''),
++      bundleId:String(abi.bundleId || 'com.sidedock.desktop'), hostAbi:Number(abi.hostAbi || process.env.SIDEDOCK_HOST_ABI || 0), hostGeneration:String(abi.hostGeneration || process.env.SIDEDOCK_HOST_GENERATION || ''), freezeContract:String(abi.freezeContract || ''),
++      runtimeVersion:String(process.env.SIDEDOCK_RUNTIME_VERSION || active.version || ''), runtimePath:String(process.env.SIDEDOCK_RUNTIME_ROOT || active.runtimePath || ''),
++      executableSha256, bootstrapSha256, hostAbiSha256, hostResourcesSha256, codeSigningIdentifier, designatedRequirement:String(designatedRequirement || '').trim(), cdHash, teamIdentifier, hostFingerprint,
++      capturedAt:Date.now()
++    };
++    const receipt = this.receipt();
++    const comparison = compareInstalledIdentity(current, receipt);
++    this.last = { ...current, installedHostFingerprint:String(receipt.hostFingerprint || ''), installedCanonicalAppPath:String(receipt.canonicalAppPath || receipt.appBundlePath || ''), installedAppTreeSha256:String(receipt.appTreeSha256 || ''), hostFrozen:Boolean(receipt.hostFrozen || receipt.hostGeneration==='H1'), sameAsInstalledHost:comparison.same, identityComparison:comparison, receiptContract:String(receipt.contract || '') };
++    return clone(this.last);
++  }
++  getSnapshot() { return clone(this.last); }
++}
++
++module.exports = { RunningHostIdentityService, deriveAppBundlePath, compareInstalledIdentity, sha256File, sha256Text, sha256Directory };
+--- /dev/null
++++ b/tests/test_v1514_stable_h1_identity_repair.js
+@@ -0,0 +1,24 @@
++const fs=require('fs'),path=require('path'),assert=require('assert');
++const root=path.join(__dirname,'..');
++const install=fs.readFileSync(path.join(root,'desktop/install.command'),'utf8');
++const verify=fs.readFileSync(path.join(root,'desktop/verify_mac_smoke.command'),'utf8');
++for(const token of [
++  'HOST_IDENTITY_SCHEME="AD_HOC_STABLE_CUSTOM_DR_V1"',
++  'HOST_STABLE_REQUIREMENT=',
++  'designated => identifier "com.sidedock.desktop"',
++  'info[CFBundleIdentifier] = "com.sidedock.desktop"',
++  'HOST_IDENTITY_REPAIR=1',
++  'weak v1.5.13 H1 signing identity detected',
++  'codesign --force --deep --sign -',
++  'codesign --force --sign - --requirements "=$HOST_STABLE_REQUIREMENT"',
++  'codesign --verify --deep --strict -R "=$HOST_STABLE_REQUIREMENT"',
++  'designatedRequirementStable',
++  'hostIdentityRepair',
++  'hostIdentityScheme'
++]) assert(install.includes(token),token);
++assert(install.includes('an authorized H1 Host is already recorded; ordinary installers must never replace it.'),'ordinary authorized H1 migration protection must remain');
++assert(install.includes('[ "$HOST_IDENTITY_REPAIR" -ne 1 ]'),'only the explicit weak-identity repair may bypass the ordinary H1 migration refusal');
++assert(!/tccutil\s+reset/i.test(install),'installer must never reset user TCC decisions');
++assert(verify.includes('AD_HOC_STABLE_CUSTOM_DR_V1')&&verify.includes('designatedRequirementStable'),'real-Mac gate must verify stable H1 signing identity');
++assert(verify.includes('identifier "com.sidedock.desktop"')&&verify.includes('info[CFBundleIdentifier]'),'real-Mac gate must verify the full SideDock custom designated requirement');
++console.log('PASS v1.5.14 H1 stable designated-requirement identity repair contract');
+--- /dev/null
++++ b/tests/test_v1514_browser_transport_hedge.js
+@@ -0,0 +1,17 @@
++const fs=require('fs'),path=require('path'),assert=require('assert');
++const root=path.join(__dirname,'..');
++const background=fs.readFileSync(path.join(root,'chrome_extension/background.js'),'utf8');
++const main=fs.readFileSync(path.join(root,'desktop/app/src/main.js'),'utf8');
++const nativeCode=fs.readFileSync(path.join(root,'desktop/app/src/bridge/native-server.js'),'utf8');
++const start=background.indexOf('async function startBrowserCommandLoop');
++const end=background.indexOf('// Native Messaging is the primary',start);
++const loop=background.slice(start,end>start?end:start+4000);
++assert(start>=0,'browser command loop missing');
++assert(loop.includes('getNextCommand(18000)'),'HTTP command long-poll must stay armed');
++assert(!loop.includes('nativeDiagnostics?.().connected'),'native socket connection alone must never suppress HTTP command fallback');
++for(const token of ['commandChannelHealthy','commandCircuitOpenUntil','NATIVE_COMMAND_CIRCUIT_OPEN','consecutiveCommandFailures','lastCommandLatencyMs']) assert(nativeCode.includes(token),token);
++assert(main.includes('350))'),'native-first transport must hedge to HTTP after 350ms');
++assert(main.includes('http_hedged_fallback')&&main.includes('http_fast_failover')&&main.includes('http_circuit_bypass'),'all fast failover states must be observable');
++assert(main.includes('const shared = { ...options, requestId }'),'native and HTTP transports must share one requestId');
++assert(background.includes("dedupCode: 'REQUEST_DEDUP_HIT_RUNNING'")&&background.includes("dedupCode: 'REQUEST_DEDUP_HIT_RESULT'"),'extension must deduplicate hedged commands');
++console.log('PASS v1.5.14 browser command health + 350ms hedged HTTP fallback contract');
+--- /dev/null
++++ b/tests/test_v1514_native_command_circuit.js
+@@ -0,0 +1,18 @@
++const assert=require('assert');
++const {NativeBridgeServer}=require('../desktop/app/src/bridge/native-server');
++(async()=>{
++  const s=new NativeBridgeServer({version:'1.5.14'});
++  s.primary={destroyed:false,_authorized:true,write(){return true;}};
++  s.send=()=>true;
++  const started=Date.now();
++  const first=await s.request('capture-active-page',{requestId:'stall-1'},350);
++  assert.equal(first.ok,false); assert.equal(first.code,'NATIVE_ADAPTER_TIMEOUT');
++  assert(Date.now()-started>=300,'test must exercise the command timeout rather than an immediate offline path');
++  assert(s.commandCircuitOpenUntil>Date.now(),'a timed-out command must open the short circuit');
++  assert.equal(s.commandChannelHealthy(),false,'connected socket with open command circuit is not healthy');
++  const second=await s.request('capture-active-page',{requestId:'stall-2'},350);
++  assert.equal(second.code,'NATIVE_COMMAND_CIRCUIT_OPEN','subsequent commands must bypass the stalled native channel immediately');
++  const d=s.diagnostics();
++  assert.equal(d.connected,true); assert.equal(d.commandHealthy,false); assert.equal(d.commandCircuitOpen,true); assert(d.consecutiveCommandFailures>=1);
++  console.log('PASS v1.5.14 Native connected-but-stalled command circuit behavior');
++})().catch(e=>{console.error(e);process.exit(1)});
+--- /dev/null
++++ b/tests/test_v1514_delivery_version_contract.js
+@@ -0,0 +1,14 @@
++const fs=require('fs'),path=require('path'),assert=require('assert');const root=path.join(__dirname,'..');
++const pkg=JSON.parse(fs.readFileSync(path.join(root,'desktop/app/package.json'),'utf8'));
++const ext=JSON.parse(fs.readFileSync(path.join(root,'chrome_extension/manifest.json'),'utf8'));
++const install=fs.readFileSync(path.join(root,'desktop/install.command'),'utf8');
++const smoke=fs.readFileSync(path.join(root,'desktop/verify_mac_smoke.command'),'utf8');
++const main=fs.readFileSync(path.join(root,'desktop/app/src/main.js'),'utf8');
++assert.equal(pkg.version,'1.5.14');assert.equal(ext.version,'1.5.14');
++assert(install.includes('SIDEDOCK_VERSION="1.5.14"')&&install.includes('BUILD_NUMBER="1514"'));
++assert(install.includes('INSTALL_RECEIPT_v1514.json'));
++assert(smoke.includes('EXPECTED_VERSION="1.5.14"')&&smoke.includes('EXPECTED_BUILD="1514"'));
++assert(main.includes('SIDEDOCK_V1514_RELEASE_GATE.json')&&main.includes("contract:'sidedock-v1514-release-gate/1'"));
++assert(fs.existsSync(path.join(root,'01_安装_SideDock_v1.5.14.command'));
++assert(fs.existsSync(path.join(root,'02_实机验收_SideDock_v1.5.14.command'));
++console.log('PASS v1.5.14 delivery/version/release-gate contract');
+--- /dev/null
++++ b/docs/v1.5.14_安装架构与浏览器容错/00_总体变更与问题闭环.md
+@@ -0,0 +1,38 @@
