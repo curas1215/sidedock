@@ -1,0 +1,160 @@
+ function runtimeBuildManifestPath() {
+@@ -204,7 +204,7 @@
+ }
+ 
+ function releaseGateEvidenceFile() {
+-  return path.join(app.getPath('userData'), 'SIDEDOCK_V1513_RELEASE_GATE.json');
++  return path.join(app.getPath('userData'), 'SIDEDOCK_V1514_RELEASE_GATE.json');
+ }
+ function preActivationTraceFile() {
+   return path.join(app.getPath('userData'), 'PREACTIVATION_SESSION_TRACE.json');
+@@ -213,7 +213,7 @@
+   try {
+     const safeSession=session?{...session,visual:{...(session.visual||{}),imagePath:''}}:null;
+     const snapshot=capture?.snapshot?{...capture.snapshot,imagePath:''}:null;
+-    const payload={contract:'sidedock-preactivation-trace/1',version:'1.5.13',writtenAt:Date.now(),source,session:safeSession,capture:{ok:Boolean(capture?.ok),code:String(capture?.code||''),attempts:capture?.attempts||[],snapshot}};
++    const payload={contract:'sidedock-preactivation-trace/1',version:'1.5.14',writtenAt:Date.now(),source,session:safeSession,capture:{ok:Boolean(capture?.ok),code:String(capture?.code||''),attempts:capture?.attempts||[],snapshot}};
+     fs.mkdirSync(path.dirname(preActivationTraceFile()),{recursive:true});
+     fs.writeFileSync(preActivationTraceFile(),JSON.stringify(payload,null,2),{mode:0o600});
+     return payload;
+@@ -221,11 +221,11 @@
+ }
+ function readReleaseGateEvidence() {
+   try { return JSON.parse(fs.readFileSync(releaseGateEvidenceFile(), 'utf8')); }
+-  catch { return { contract:'sidedock-v1513-release-gate/1', version:'1.5.13', sourceSwitch:null, requestIsolation:null, preFocusManualRuns:[], updatedAt:0 }; }
++  catch { return { contract:'sidedock-v1514-release-gate/1', version:'1.5.14', sourceSwitch:null, requestIsolation:null, preFocusManualRuns:[], updatedAt:0 }; }
+ }
+ function writeReleaseGateEvidence(patch = {}) {
+   const current = readReleaseGateEvidence();
+-  const next = { ...current, contract:'sidedock-v1513-release-gate/1', version:'1.5.13', ...patch, updatedAt:Date.now() };
++  const next = { ...current, contract:'sidedock-v1514-release-gate/1', version:'1.5.14', ...patch, updatedAt:Date.now() };
+   fs.mkdirSync(path.dirname(releaseGateEvidenceFile()), { recursive:true });
+   fs.writeFileSync(releaseGateEvidenceFile(), JSON.stringify(next, null, 2), { mode:0o600 });
+   return next;
+@@ -272,7 +272,7 @@
+     appTreeSha256:String(hostReceipt?.appTreeSha256||''),
+     installReceiptContract:String(installReceipt?.contract||'')
+   };
+-  return {contract:'sidedock-v1513-release-readiness/1',version:'1.5.13',permissionNoLoop:gate.permissionNoLoop||null,attachmentDeliverySummary:gate.attachmentDeliverySummary||null,outsideClickSummary:gate.outsideClickSummary||null,preFocusManualSummary:gate.preFocusManualSummary||null,allReadersOffVisual:gate.allReadersOffVisual||null,noFullScreenScope:gate.noFullScreenScope||null,visionFallbackSelfTest:gate.visionFallbackSelfTest||null,sourceSwitch:gate.sourceSwitch||null,requestIsolation:gate.requestIsolation||null,hostIdentity,checkedAt:Date.now()};
++  return {contract:'sidedock-v1514-release-readiness/1',version:'1.5.14',permissionNoLoop:gate.permissionNoLoop||null,attachmentDeliverySummary:gate.attachmentDeliverySummary||null,outsideClickSummary:gate.outsideClickSummary||null,preFocusManualSummary:gate.preFocusManualSummary||null,allReadersOffVisual:gate.allReadersOffVisual||null,noFullScreenScope:gate.noFullScreenScope||null,visionFallbackSelfTest:gate.visionFallbackSelfTest||null,sourceSwitch:gate.sourceSwitch||null,requestIsolation:gate.requestIsolation||null,hostIdentity,checkedAt:Date.now()};
+ }
+ 
+ function preActivationGateStatus() {
+@@ -283,7 +283,7 @@
+   const checks=[
+     {id:'native_session',ok:Boolean(session.sessionId),message:session.sessionId||''},
+     {id:'target_frozen_before_focus',ok:Boolean(pre.capturedBeforeSideDockFocus),message:`capturedBeforeSideDockFocus=${Boolean(pre.capturedBeforeSideDockFocus)}`},
+-    {id:'pixel_capture_demand_driven',ok:!pre.captureStartedBeforeSideDockFocus,message:`captureStartedBeforeSideDockFocus=${Boolean(pre.captureStartedBeforeSideDockFocus)}; v1.5.13 requires pixels only after structured insufficiency`},
++    {id:'pixel_capture_demand_driven',ok:!pre.captureStartedBeforeSideDockFocus,message:`captureStartedBeforeSideDockFocus=${Boolean(pre.captureStartedBeforeSideDockFocus)}; v1.5.14 requires pixels only after structured insufficiency`},
+     {id:'sidedock_not_frontmost',ok:pre.sideDockWasFrontmost===false,message:`sideDockWasFrontmost=${String(pre.sideDockWasFrontmost)}`},
+     {id:'concrete_target',ok:Boolean(target.pid&&target.bundleId&&target.bounds),message:`${target.appName||target.bundleId||''} PID=${target.pid||0} W=${target.cgWindowId||'bounds'}`},
+     {id:'snapshot_ready',ok:Boolean(snapshot?.snapshotId&&snapshot?.imageBytes>0),message:snapshot?`${snapshot.captureMode||''} ${snapshot.widthPx||0}x${snapshot.heightPx||0}`:'snapshot missing'},
+@@ -341,7 +341,7 @@
+   const sessionId=String(pending?.preActivationSessionId||pending?.activationSessionId||'');
+   let session=sessionId?preActivationSessionService?.getById?.(sessionId):null;
+   if(!session) session=preActivationSessionService?.getActive?.({maxAgeMs:5*60*1000})||null;
+-  // v1.5.13 hard invariant: Settings/probes may not synthesize a fake
++  // v1.5.14 hard invariant: Settings/probes may not synthesize a fake
+   // pre-activation target after SideDock is already focused. If no native
+   // session exists the user must reopen SideDock from the target window.
+   return session||null;
+@@ -410,7 +410,7 @@
+   const permissionSnapshot={raw,state,previous:lastScreenPermissionState,changed:lastScreenPermissionState!=='UNKNOWN'&&lastScreenPermissionState!==state,checkedAt:Date.now(),capability,nativePreflight:permissionReport.nativePreflight,nativePreflightScope:permissionReport.nativePreflightScope||'',electronReportedState:permissionReport.electronReportedState,upgradeIdentity:readUpgradeIdentityStatus()};
+   lastScreenPermissionState=state;
+   if(broadcast){ broadcastPermissionSnapshot(permissionSnapshot); broadcastVisionCapability(lastVisionCapabilityProbe); }
+-  // v1.5.13: permission changes never resume an old frozen target. The user
++  // v1.5.14: permission changes never resume an old frozen target. The user
+   // must return to the real target window and start a fresh request so the
+   // PreActivationSession cannot become stale while System Settings is frontmost.
+   return lastVisionCapabilityProbe;
+@@ -752,7 +752,7 @@
+ }
+ 
+ function sideDockWindowIdsForCapture() {
+-  // On macOS v1.5.13 uses Electron macOS `type: panel` handle/orb surfaces. They do not
++  // On macOS v1.5.14 uses Electron macOS `type: panel` handle/orb surfaces. They do not
+   // activate SideDock. REGION fallback hides every SideDock window atomically,
+   // so CGWindow exclusion IDs are optional rather than a build-time dependency.
+   const ids = [];
+@@ -818,7 +818,7 @@
+   }
+   const session = created.session;
+   const latch = preActivationSessionService.asLatch(session);
+-  // v1.5.13 production truth is the atomic PreActivationSession. Do not mirror
++  // v1.5.14 production truth is the atomic PreActivationSession. Do not mirror
+   // it into the legacy latch store: a second mutable "current" source is exactly
+   // what caused v1.5.6-v1.5.8 stale-target contamination.
+   let capture = { ok:true, code:'PREACTIVATION_SESSION_LATCHED', snapshot:null, attempts:[] };
+@@ -1187,8 +1187,8 @@
+   const current = contextEngine?.getCurrent?.() || null;
+   return {
+     ok: true,
+-    version:'1.5.13',
+-    runtimeHost:{hostAbi:Number(process.env.SIDEDOCK_HOST_ABI||0),hostGeneration:String(process.env.SIDEDOCK_HOST_GENERATION||''),hostApi:hostApiStatus(),runtimeVersion:String(process.env.SIDEDOCK_RUNTIME_VERSION||'1.5.13'),runtimeRoot:process.env.SIDEDOCK_RUNTIME_ROOT?'[external-runtime]':'[package-runtime]',hostReceipt:readHostReceipt(),h1Authorization:readH1AuthorizationStatus(app.getPath('userData')),installReceipt:readInstallReceipt()},
++    version:'1.5.14',
++    runtimeHost:{hostAbi:Number(process.env.SIDEDOCK_HOST_ABI||0),hostGeneration:String(process.env.SIDEDOCK_HOST_GENERATION||''),hostApi:hostApiStatus(),runtimeVersion:String(process.env.SIDEDOCK_RUNTIME_VERSION||'1.5.14'),runtimeRoot:process.env.SIDEDOCK_RUNTIME_ROOT?'[external-runtime]':'[package-runtime]',hostReceipt:readHostReceipt(),h1Authorization:readH1AuthorizationStatus(app.getPath('userData')),installReceipt:readInstallReceipt()},
+     readOnly: true,
+     frontmost:windowRegistry?.diagnostics?.()?.actualFrontmostApp || null,
+     liveTarget:liveTargetService?.snapshot?.()||null,
+@@ -1290,7 +1290,7 @@
+ }
+ 
+ 
+-function restartStateFile() { return path.join(app.getPath('userData'), 'restart-state-v1513.json'); }
++function restartStateFile() { return path.join(app.getPath('userData'), 'restart-state-v1514.json'); }
+ 
+ function loadRestartState() {
+   try { return JSON.parse(fs.readFileSync(restartStateFile(), 'utf8')); } catch { return null; }
+@@ -1643,9 +1643,9 @@
+   ipcMain.handle('diagnostics:target-timeline',(_event,payload={})=>contextEngine.targetContinuitySnapshot(String(payload.requestId||'')));
+   ipcMain.handle('diagnostics:live-target',()=>liveTargetService?.snapshot?.()||null);
+   ipcMain.handle('diagnostics:request-target',(_event,payload={})=>requestTargetStore?.diagnostics?.(String(payload.requestId||''))||null);
+-  ipcMain.handle('diagnostics:capture-pipeline',()=>({version:'1.5.13',liveTarget:liveTargetService?.snapshot?.()||null,pinnedTarget:pinnedTargetStore?.diagnostics?.()||null,requestTargets:requestTargetStore?.diagnostics?.()||null,preActivationSession:preActivationSessionService?.diagnostics?.()||null,nativeDock:nativeDockController?.diagnostics?.()||null,permissionCoordinator:permissionCoordinator?.getSnapshot?.()||null,captureBackends:captureBackendManager?.diagnostics?.()||null,activationVisual:activationVisualCaptureService?.diagnostics?.()||null,activationSnapshots:activationVisualSnapshotStore?.diagnostics?.()||null,attachmentDelivery:attachmentDeliveryService?.diagnostics?.()||null,chromeWindowBinding:chromeWindowBindingService?.diagnostics?.()||null,latestTrace:contextEngine?.getLatestTrace?.()||null,currentContext:contextEngine?.getCurrent?.()||null,releaseGate:readReleaseGateEvidence(),releaseReadiness:releaseReadinessSummary()}));
++  ipcMain.handle('diagnostics:capture-pipeline',()=>({version:'1.5.14',liveTarget:liveTargetService?.snapshot?.()||null,pinnedTarget:pinnedTargetStore?.diagnostics?.()||null,requestTargets:requestTargetStore?.diagnostics?.()||null,preActivationSession:preActivationSessionService?.diagnostics?.()||null,nativeDock:nativeDockController?.diagnostics?.()||null,permissionCoordinator:permissionCoordinator?.getSnapshot?.()||null,captureBackends:captureBackendManager?.diagnostics?.()||null,activationVisual:activationVisualCaptureService?.diagnostics?.()||null,activationSnapshots:activationVisualSnapshotStore?.diagnostics?.()||null,attachmentDelivery:attachmentDeliveryService?.diagnostics?.()||null,chromeWindowBinding:chromeWindowBindingService?.diagnostics?.()||null,latestTrace:contextEngine?.getLatestTrace?.()||null,currentContext:contextEngine?.getCurrent?.()||null,releaseGate:readReleaseGateEvidence(),releaseReadiness:releaseReadinessSummary()}));
+   ipcMain.handle('diagnostics:preactivation-gate-status',()=>preActivationGateStatus());
+-  ipcMain.handle('diagnostics:v1513-release-readiness',()=>releaseReadinessSummary());
++  ipcMain.handle('diagnostics:v1514-release-readiness',()=>releaseReadinessSummary());
+   ipcMain.handle('diagnostics:record-outside-click-fail',(_event,payload={})=>({ok:true,gate:recordOutsideClickFailure(String(payload.note||'manual outside-click failure'))}));
+   ipcMain.handle('diagnostics:record-preactivation-verdict',(_event,payload={})=>recordPreActivationManualVerdict({pass:Boolean(payload.pass),note:String(payload.note||'')}));
+   ipcMain.handle('diagnostics:clear-preactivation-verdicts',()=>{const gate=writeReleaseGateEvidence({preFocusManualRuns:[],preFocusManualSummary:{total:0,pass:0,fail:0,wrongWindow:0,updatedAt:Date.now()}});return {ok:true,summary:gate.preFocusManualSummary};});
+@@ -1815,11 +1815,11 @@
+       {id:'image_integrity_gate',status:integrity?.ok?'PASS':'FAIL',message:integrity?.code||'IMAGE_INTEGRITY_UNVERIFIED'},
+       {id:'no_full_display_guard',status:scopeGuard?.ok&&scopeGuard?.noFullScreen?'PASS':'FAIL',message:scopeGuard?.ok?(latch?.isFullscreen?'目标自身为 macOS 全屏窗口，允许等屏大小窗口视觉。':'非全屏目标未退化为整屏截图。'):(scopeGuard?.code||'SCOPE_GUARD_FAILED')},
+       {id:'native_prefocus_boundary',status:session?.preFocus?.capturedBeforeSideDockFocus&&session?.preFocus?.sideDockWasFrontmost===false?'PASS':'FAIL',message:session?`targetFrozenBeforeFocus=${Boolean(session.preFocus?.capturedBeforeSideDockFocus)}, pixelsDeferred=${!Boolean(session.preFocus?.captureStartedBeforeSideDockFocus)}`:'NO_PREACTIVATION_SESSION'},
+-      {id:'target_error_does_not_gate_vision',status:'PASS',message:'v1.5.13 视觉链直接消费 Native PreActivationSession；Target Resolver/Window Registry 不得否决窗口视觉。'},
++      {id:'target_error_does_not_gate_vision',status:'PASS',message:'v1.5.14 视觉链直接消费 Native PreActivationSession；Target Resolver/Window Registry 不得否决窗口视觉。'},
+       {id:'chatgpt_attachment_channel',status:attachment?.composerFound?'PASS':'FAIL',message:attachment?.composerFound?'ChatGPT composer 可发现；真实附件必须 Preview/Ready/ACK 后才允许发送原问题。':attachment?.code||'CHATGPT_COMPOSER_NOT_FOUND'}
+     ];
+     const ok=items.every(x=>x.status==='PASS');
+-    const payload={ok,version:'1.5.13',startedAt,finishedAt:Date.now(),session,latch,snapshot:snapshot?{...snapshot,imagePath:''}:null,permissionGate,scopeGuard,identityGuard,integrity,attachment,items};
++    const payload={ok,version:'1.5.14',startedAt,finishedAt:Date.now(),session,latch,snapshot:snapshot?{...snapshot,imagePath:''}:null,permissionGate,scopeGuard,identityGuard,integrity,attachment,items};
+     writeReleaseGateEvidence({visionFallbackSelfTest:{ok,startedAt,finishedAt:payload.finishedAt,items:items.map(({id,status,message})=>({id,status,message})),captureMode:snapshot?.captureMode||'',backend:snapshot?.backend||'',permissionGate,scopeGuard,identityGuard,integrity,evidenceAt:Date.now()}});
+     return payload;
+   });
+@@ -1859,7 +1859,7 @@
+     } else {
+       await ensureMacPreActivationSession('chat-prepare-context',{startCapture:false}).catch(()=>null);
+     }
+-    // macOS v1.5.13-R2 never guesses the current SideDock-frontmost window. It
++    // macOS v1.5.14-R2 never guesses the current SideDock-frontmost window. It
+     // uses either the event-time session or a bounded, concrete external target
+     // observation that was recorded before SideDock took focus.
+     const context=await contextEngine.prepareForPrompt(String(query||''));
+@@ -2075,7 +2075,7 @@
+ });
+ 
+ app.on('browser-window-focus', () => {
+-  // v1.5.13: focus/return is metadata-only. Never prove permission by taking a
++  // v1.5.14: focus/return is metadata-only. Never prove permission by taking a
+   // screenshot. A settings round-trip can only transition the coordinator to
+   // RESTART_REQUIRED; pixel backends remain blocked until the next process.
+   const privacyRoundTripAge = lastPrivacyScreenOpenAt ? Date.now() - lastPrivacyScreenOpenAt : 0;
+@@ -2114,12 +2114,12 @@
+   chromeWindowBindingService = new ChromeWindowBindingService({registry:browserTargetRegistry,maxAgeMs:1500,minIou:0.90,minGap:0.10,displayProvider:()=>screen.getAllDisplays?.()||[]});
+   {
+     const diag = configStore.get().diagnostics || {};
+-    transactionLog = new TransactionLogStore({ baseDir: path.join(app.getPath('userData'), 'logs'), version: '1.5.13', retentionDays: diag.retentionDays || 7, maxTotalBytes: diag.maxLogBytes || 20971520 });
++    transactionLog = new TransactionLogStore({ baseDir: path.join(app.getPath('userData'), 'logs'), version: '1.5.14', retentionDays: diag.retentionDays || 7, maxTotalBytes: diag.maxLogBytes || 20971520 });
+   }
+   transactionLog.prune();
+   // v1.5.7 has one runtime source-of-truth owner: LiveTargetService.
