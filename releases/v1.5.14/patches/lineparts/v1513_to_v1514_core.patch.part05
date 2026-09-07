@@ -1,0 +1,160 @@
++# v1.5.14 总体变更与问题闭环
++
++## 真实问题 1：系统设置已授权但 H1 仍 DENIED
++
++### 证据结论
++v1.5.13 已证明目标 Chrome 具体窗口解析、CGWindowID、Browser Window binding 已可对齐；失败发生在 pixel capture 前的 TCC Gate。旧 H1 的签名身份不具备可显式验证的稳定 Designated Requirement，因此 v1.5.14 不再继续修改 TargetResolver，而是修权限主体身份。
++
++### v1.5.14 闭环
++- 一次性识别弱 H1 identity；
++- 重建同一 H1 Host；
++- 为外层 bundle 写入固定显式 DR；
++- 安装前后验证 DR；
++- 新 Host 授权后日常升级只替换外部 Runtime；
++- 完整 tree hash 继续保护冻结 Host。
++
++## 真实问题 2：Native Port connected，但 command timeout
++
++### 原因
++旧扩展只要 Native Port 处于 connected，就暂停 localhost HTTP long-poll。Native socket 存活但命令不回包时，Desktop 的 HTTP fallback 启动了也没有扩展来取命令。
++
++### v1.5.14 闭环
++- HTTP long-poll 永久在线；
++- Native 350ms hedge window；
++- same requestId；
++- extension in-flight/result dedup；
++- command-health circuit breaker；
++- Native 失败后的后续请求直接 HTTP bypass。
++
++## 不允许回归的既有要求
++- 读取用户点击前的具体外部窗口，不是全屏；
++- Chrome 多窗口不得跨窗口读；
++- Terminal / Activity Monitor / 飞书结构化不足时必须视觉兜底；
++- exact-first，不能有 WindowID 时盲目 region；
++- 外部应用只读；
++- 权限未 GRANTED 时零截图 backend；
++- hover/input/IME 保护与 outside-click 立即回收；
++- 30 秒 idle 生命周期；
++- attachment 必须 ACK 后才发送 prompt。
+--- /dev/null
++++ b/docs/v1.5.14_安装架构与浏览器容错/01_H1稳定权限身份_TDD.md
+@@ -0,0 +1,71 @@
++# H1 稳定权限身份 TDD
++
++## 目标
++在零付费 Apple Developer、零用户编译器前提下，让当前 H1 具备**显式、可验证、固定的 Designated Requirement**，并继续通过冻结 Host 避免日常升级改变权限主体。
++
++## 常量
++
++- bundleId: `com.sidedock.desktop`
++- hostAbi: `1`
++- hostGeneration: `H1`
++- freezeContract: `sidedock-h1-freeze/1`
++- identityScheme: `AD_HOC_STABLE_CUSTOM_DR_V1`
++- DR source: `designated => identifier "com.sidedock.desktop" and info[CFBundleIdentifier] = "com.sidedock.desktop"`
++
++## 安装状态机
++
++### EXISTING_H1_STABLE
++Host marker 与 H1 契约一致，并且现有 DR 同时包含 SideDock identifier 与 CFBundleIdentifier rule。
++
++行为：
++- `HOST_MIGRATION=0`
++- 只更新外部 Runtime
++- Host tree hash / DR / fingerprint 必须前后一致
++
++### EXISTING_H1_WEAK
++Host marker 是 H1，但 DR 不满足稳定 requirement。
++
++行为：
++- `HOST_MIGRATION=1`
++- `HOST_IDENTITY_REPAIR=1`
++- 允许一次替换弱身份 H1
++- 重置的是 SideDock 自己的 `H1_AUTHORIZATION_STATUS` 证据，不调用系统 `tccutil reset`
++- 用户对修复后的 H1 重新授权一次
++
++### AUTHORIZED_H1_REPLACEMENT_ATTEMPT
++已经是稳定 H1 且 `authorized=true`，但安装器因其他原因尝试 Host migration。
++
++行为：硬失败 `HOST_MIGRATION_REQUIRED`；不得覆盖。
++
++## 签名顺序
++
++1. `codesign --force --deep --sign - <SideDock.app>`，处理嵌套 code；
++2. 外层 bundle 再签，并通过 `--requirements "=<literal requirement>"` 写入显式 DR；
++3. `codesign --verify --deep --strict`；
++4. `codesign --verify --deep --strict -R "=<literal requirement>"`；
++5. `codesign -d -r-` 读取实际 DR，必须同时包含 identifier 与 info rule；
++6. commit 后对目标 app 重复第 3~5 步。
++
++## 回执字段
++
++### HOST_RECEIPT.json
++- `hostIdentityScheme`
++- `designatedRequirementStable`
++- `designatedRequirement`
++- `hostFingerprint`
++- `appTreeSha256`
++- `hostFrozen`
++
++### INSTALL_RECEIPT_v1514.json
++- `hostMigration`
++- `hostIdentityRepair`
++- `hostIdentityScheme`
++- `designatedRequirementStable`
++- `hostDesignatedRequirement`
++
++## 真实 Mac Gate
++静态测试只能证明安装器逻辑和契约。必须在真实 macOS 上证明：
++- 新 DR 被 codesign 实际写入；
++- System Settings 授权后 H1 进程实际读取为 GRANTED；
++- 完全退出/重启仍 GRANTED；
++- 第二次 runtime-only 安装后仍 GRANTED 且 Host tree hash 不变。
+--- /dev/null
++++ b/docs/v1.5.14_安装架构与浏览器容错/02_BrowserTransport_350ms_Hedge_TDD.md
+@@ -0,0 +1,57 @@
++# Browser Transport 350ms Hedge TDD
++
++## 旧失败链
++
++`Native Port connected -> HTTP long-poll stopped -> Native command stalls -> Desktop waits timeout -> HTTP fallback queued -> Extension does not fetch HTTP command`
++
++这不是 DOM reader 本身失败，而是 transport health 与 socket connected 被错误等价。
++
++## 新架构
++
++### Extension
++`startBrowserCommandLoop()` 永远保持一个 `getNextCommand(18000)` long-poll。
++
++Long-poll 本身：
++- 不读取 DOM；
++- 不截图；
++- 只等待 Desktop command；
++- Native 正常时仍可同时待命。
++
++### Desktop requester
++每次请求生成/沿用唯一 `requestId`：
++
++1. HTTP-only 配置：直接 HTTP；
++2. Native command circuit unhealthy：直接 HTTP bypass；
++3. Native healthy：先发送 Native；
++4. Native 350ms 内成功：返回 Native；
++5. Native 350ms 未 settle：用同 requestId 发 HTTP；
++6. Native/HTTP 谁先成功就返回谁；
++7. 两边都失败才返回 Browser Adapter failure。
++
++### Dedup
++Extension `requestCache`：
++- running -> 等待同一个 Promise，返回 `REQUEST_DEDUP_HIT_RUNNING`；
++- done -> 复用结果，返回 `REQUEST_DEDUP_HIT_RESULT`；
++- TTL 30s；
++- 同 requestId 不执行第二次实际 page capture。
++
++### Native command health
++NativeBridge 记录：
++- `lastCommandStartedAt`
++- `lastCommandCompletedAt`
++- `lastCommandSuccessAt`
++- `lastCommandFailureAt`
++- `lastCommandLatencyMs`
++- `lastCommandCode`
