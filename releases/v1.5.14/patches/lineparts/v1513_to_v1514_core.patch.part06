@@ -1,0 +1,71 @@
++- `consecutiveCommandFailures`
++- `commandCircuitOpenUntil`
++- `commandHealthy`
++
++Timeout/send failure会打开 5s circuit；circuit 内非 ping 命令返回 `NATIVE_COMMAND_CIRCUIT_OPEN`，Browser requester 直接 HTTP。
++
++## 关键约束
++- heartbeat/socket connected 只能证明连接存在，不能证明 command healthy；
++- hedge 的两个 transport 必须复用 requestId；
++- HTTP keep-alive 不得变成 idle DOM capture；
++- 不允许为了容错读取“最新 tab”代替 request target；
++- Browser transport 失败后仍要遵守原有 exact-window/visual fallback scope。
+--- /dev/null
++++ b/docs/v1.5.14_安装架构与浏览器容错/03_真实Mac验收矩阵.md
+@@ -0,0 +1,21 @@
++# v1.5.14 真实 Mac 验收矩阵
++
++| Gate | 操作 | PASS 条件 |
++|---|---|---|
++| H1-IDENTITY | 首次安装 v1.5.14 | H1、stable custom DR、receipt/fingerprint 一致 |
++| H1-TCC | Screen + AX 授权，完全退出/重启 | 两项均 GRANTED，`authorized=true` 且 fingerprint 一致 |
++| H1-CONTINUITY | 双权限后再运行同一安装器 | runtime-only、Host tree hash 不变、0 新权限弹窗、重启仍 GRANTED |
++| CHROME-NATIVE | Chrome 正常 Adapter | exact target，返回当前点击窗口内容 |
++| CHROME-STALL | 制造 Native command stalled/不可用 | 350ms 后 HTTP 可接管；不得旧式 3s+ 串行等待；不重复 DOM read |
++| CHROME-2WIN | 两窗口不同 token | A 只读 A，B 只读 B，不 latest-tab substitution |
++| ACTIVITY-MONITOR | 结构化不足 | Exact Visual 是具体活动监视器窗口 |
++| TERMINAL | 结构化不足 | Exact Visual 是具体 Terminal 窗口 |
++| FEISHU | shell/meta-only | 必须继续视觉，不把标题/A1/缩放当表格正文 |
++| PERMISSION-DENIED | 未授权状态重复请求 | 50 次、pixel backend delta=0、无无限 WAITING_PERMISSION |
++| NO-FULLSCREEN | 非 fullscreen target | 视觉 scope 不得变成整屏 |
++| ATTACHMENT | ChatGPT 实际附件 | 最近 20 次 20/20 ACK 后才发 prompt |
++| OUTSIDE-CLICK | 真实鼠标外点 | >=100，0 FAIL，P95<=250ms |
++| INPUT-IDLE | 输入/IME + idle | 输入中不回收；离开输入区约30s按生命周期回收 |
++| PREFOCUS | >=50 个不同点击前窗口 | unique session/snapshot>=50，wrongWindow=0 |
++
++`02_实机验收_SideDock_v1.5.14.command` 只接受真实 Gate 数据，不根据静态测试推断真实 Mac PASS。
+--- /dev/null
++++ b/docs/v1.5.14_安装架构与浏览器容错/04_实现追踪.md
+@@ -0,0 +1,32 @@
++# v1.5.14 实现追踪
++
++## TCC / H1
++- `desktop/install.command`
++  - stable custom DR
++  - one-time weak H1 repair
++  - literal requirement `=` prefix
++  - `codesign -R` pre/post verification
++  - receipts / rollback / routine Host immutability
++- `desktop/verify_mac_smoke.command`
++  - v1.5.14 receipt/version/H1 identity/TCC continuity gate
++- `desktop/app/src/context/running-host-identity.js`
++  - v1514/v1513/v1512 receipt fallback
++
++## Browser transport
++- `chrome_extension/background.js`
++  - always-on HTTP command long-poll
++  - requestId running/done dedup
++- `desktop/app/src/bridge/native-server.js`
++  - command health + circuit breaker
++- `desktop/app/src/main.js`
++  - 350ms Native-first hedge
++  - same requestId Native + HTTP
++
++## Automated tests
++- `tests/test_v1514_stable_h1_identity_repair.js`
++- `tests/test_v1514_browser_transport_hedge.js`
++- `tests/test_v1514_native_command_circuit.js`
++- `tests/test_v1514_delivery_version_contract.js`
++
++## 保留回归
++其余 v1.5.x 全部已有测试继续参与全量回归，覆盖窗口目标、visual scope、权限 no-loop、附件、outside click、只读、H1 runtime integrity 等。
