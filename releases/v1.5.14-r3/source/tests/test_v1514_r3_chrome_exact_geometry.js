@@ -1,0 +1,13 @@
+const assert=require('assert');
+const {BrowserTargetRegistry}=require('../desktop/app/src/context/browser-target-registry');
+const {ChromeWindowBindingService}=require('../desktop/app/src/context/chrome-window-binding-service');
+const now=Date.now();
+const target={appName:'Google Chrome',bundleId:'com.google.Chrome',pid:7,cgWindowId:231751,bounds:{x:-26,y:38,width:1512,height:859}};
+let r=new BrowserTargetRegistry();
+r.update({version:5,extensionVersion:'1.5.13',windowId:1573933138,tabId:1573933137,windowBounds:{x:-26,y:38,width:1512,height:859},focused:false,heartbeat:true,metadataOnly:true,observedAt:now});
+r.update({version:5,extensionVersion:'1.5.13',windowId:1573931778,tabId:1573933136,windowBounds:{x:0,y:38,width:1512,height:859},focused:false,heartbeat:true,metadataOnly:true,observedAt:now});
+let svc=new ChromeWindowBindingService({registry:r,minGap:0.10}); let x=svc.resolve(target,{now});
+assert.equal(x.state,'EXACT'); assert.equal(x.browserWindowId,1573933138); assert.equal(x.exactGeometryMatch,true);
+r=new BrowserTargetRegistry(); for(const id of [1,2]) r.update({version:5,extensionVersion:'1.5.14',windowId:id,tabId:100+id,windowBounds:{x:-26,y:38,width:1512,height:859},focused:false,heartbeat:true,metadataOnly:true,observedAt:now});
+svc=new ChromeWindowBindingService({registry:r,minGap:0.10}); x=svc.resolve(target,{now}); assert.equal(x.state,'AMBIGUOUS');
+console.log('PASS v1.5.14 R3 unique exact Chrome geometry binding');
