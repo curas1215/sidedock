@@ -1,58 +1,53 @@
 # SideDock TASK_STATE
 
 Updated: 2026-09-08
-Status: `CODE_VALIDATED_V1514_R2_REAL_MAC_TCC_WINDOW_GATE_PENDING`
-Release: `v1.5.14 R2`
+Status: `CODE_VALIDATED_V1514_R3_REAL_MAC_PERMISSION_BROWSER_GATE_PENDING`
+Release: `v1.5.14 R3`
 Policy: NON_DEGRADABLE / NO_FABRICATED_PASS
 
 ## Latest real-Mac evidence
 
-The first v1.5.14 installer reached `[2/9] Preparing immutable Permission Host` and failed before Atomic Commit with:
+R2 now completed the target-Mac installer from `[1/9]` through `[9/9]` with `hostMigration=1`. The following live capture then failed with `RUNNING_HOST_IDENTITY_MISMATCH`.
 
-`codesign Requirement syntax error: unexpected token: designated`
+The important evidence is that path, bundle ID, Host ABI/generation, Electron executable SHA, bootstrap SHA, HOST_ABI SHA and Host resources SHA all matched the installed receipt. Only the running `designatedRequirement` display parsed as empty, which caused `requirementMatch=false` and therefore `fingerprintMatch=false`.
 
-Root cause: the typed internal requirement set beginning with `designated =>` was correctly suitable for `codesign --requirements` during signing, but was incorrectly reused for `codesign -R`, which expects one untyped test expression.
+The same capture also showed a Chrome binding false ambiguity: candidate A exactly matched the CGWindow bounds (IoU=1.000), while candidate B was shifted by 26 px (IoU about 0.966). In addition, the live Chrome heartbeat still reported `extensionVersion=1.5.13` after the R2 disk install.
 
-## R2 closure
+## R3 closures
 
-R2 splits the requirement roles:
+1. Running Host identity no longer trusts only `codesign -d -r-` display parsing. If the receipt contains a DR, R3 tests the CURRENT `SideDock.app` with real `codesign --verify --deep --strict -R =<receipt requirement>`. Only a successful verification can supply the receipt requirement to the Host fingerprint. Failure remains fail-closed.
+2. Chrome binding now gives priority to the unique candidate whose x/y/width/height are all within 1 px of the exact target. If two candidates are both exact, the state remains AMBIGUOUS and SideDock does not guess.
+3. The installer clean-stops SideDock's own Electron process immediately before atomic runtime/Host handoff, then starts the committed App. The matcher uses command-prefix matching and does not self-match a grep/awk helper.
+4. Self-test and target-Mac Gate now require the LIVE Browser Adapter heartbeat to report `1.5.14`. If Chrome still holds the 1.5.13 service worker, the installer/self-test explicitly require one Chrome restart or unpacked-extension Reload.
 
-1. `HOST_STABLE_REQUIREMENT` retains `designated =>` and is used only for signing/embedding the requirement set.
-2. `HOST_STABLE_TEST_REQUIREMENT` omits `designated =>` and is used by every `codesign -R` verification.
-3. A regression guard explicitly forbids the old invalid `-R "=$HOST_STABLE_REQUIREMENT"` form.
-4. The real-Mac failure occurred before Atomic Commit, so this failed path did not intentionally replace the existing installed Host.
+## R3 automated / packaging QA
 
-The prior v1.5.14 architecture fixes remain preserved: exact-window/PreActivationSession targeting, H1 Host/Runtime separation, Browser HTTP hot standby, same-requestId Native/HTTP dedup, 350ms hedge and degraded Native fast-fail behavior.
-
-## R2 automated QA
-
-- Automated regression: **132/132 PASS**
-- Active JavaScript syntax: **217/217 PASS**
+- Automated regression: **136/136 PASS**
+- Active JavaScript syntax: **221/221 PASS**
 - Active shell syntax: **6/6 PASS**
-- Active JSON parse: **11/11 PASS**
-- Manifest: **1161 files, 0 mismatch**
-- Fresh extracted ZIP regression: **132/132 PASS**
+- Active JSON parse: **12/12 PASS**
+- Static read-only/no-fullscreen/no-TCC-reset/no-user-compiler audit: **PASS**
+- BUILD_MANIFEST: **1186 files, 0 mismatch**
+- Fresh extracted final ZIP regression: **136/136 PASS**
+- Fresh extracted final ZIP syntax: **221 JS / 6 Shell / 12 JSON PASS**
+- Fresh extracted final static safety and executable-bit Gate: **PASS**
 - ZIP integrity: **PASS**
-- Static safety/read-only/no TCC reset/no user compiler: **PASS**
 
-ZIP SHA256: `de1f502eb3d056d62f34e082b02c116265e611bf8cd0de0d204f24023606aba5`
-BUILD_MANIFEST SHA256: `5d190192c7fcbd49eeedafd46678b9d06921dafe80fef67ca6e95d5987a7a817`
+Final R3 ZIP SHA256: `3d5fab8815d1e1761b2e427c8bd610b6012bab00134436fef6017bb1370f74d7`
 
 ## Real-Mac gates still pending
 
 Do **not** call the release `FULLY_VERIFIED_ON_TARGET_MAC` until the user's target Mac proves:
 
-- R2 passes the corrected staged/final Host `codesign -R` checks;
-- Screen Recording + Accessibility become GRANTED for the actual running H1 after any required one-time authorization and full quit/reopen;
-- second R2 install is Runtime-only and preserves Host/TCC identity;
-- exact Activity Monitor/Terminal/Feishu pixels with no wrong/full-display capture;
-- live Chrome Native-timeout -> HTTP hot fallback and single/dual-window isolation;
-- ChatGPT attachment ACK gate;
-- outside-click latency gate;
-- unique pre-focus session/snapshot gate.
+- Running Host identity comparison is true after R3 restart;
+- Accessibility + Screen Recording are actually GRANTED for the current H1 after one authorization and full quit/reopen;
+- Chrome live heartbeat is extensionVersion 1.5.14;
+- the reproduced two-window case binds the unique exact Browser Window instead of AMBIGUOUS;
+- the second R3 install is Runtime-only and preserves Host/TCC identity with zero new permission prompt;
+- live Native-stall -> HTTP hedge, Activity Monitor/Terminal/Feishu window pixels, no-full-display, ChatGPT attachment ACK, outside-click latency, input/IME/lifecycle and >=50 unique pre-focus gates pass.
 
 ## Next action
 
-Do not retry the original v1.5.14 package. On the target Mac, run the R2 package's `01_安装_SideDock_v1.5.14.command`. If installation reaches `[9/9]`, complete any one-time macOS privacy authorization, fully quit/reopen SideDock, run the R2 installer a second time to prove Runtime-only continuity, then run `02_实机验收_SideDock_v1.5.14.command`.
+On the target Mac, install R3 directly without uninstalling. Let the installer stop/restart SideDock itself. Grant Accessibility + Screen Recording to the current `~/Applications/SideDock.app`, fully quit/reopen SideDock, then quit/reopen Chrome once (or Reload the unpacked SideDock extension). Retest the latest two-window case, run the same R3 installer a second time to prove Runtime-only continuity, then run `02_实机验收_SideDock_v1.5.14.command`.
 
-Canonical R2 state, patch, test and final verification are stored under `releases/v1.5.14-r2/`.
+Canonical R3 state and source delta are stored under `releases/v1.5.14-r3/`.
