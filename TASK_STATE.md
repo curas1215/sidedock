@@ -7,18 +7,19 @@ Policy: NON_DEGRADABLE / NO_FABRICATED_PASS
 
 ## Latest real-Mac evidence
 
-R2 now completed the target-Mac installer from `[1/9]` through `[9/9]` with `hostMigration=1`. The following live capture then failed with `RUNNING_HOST_IDENTITY_MISMATCH`.
+R2 completed the target-Mac installer from `[1/9]` through `[9/9]` with `hostMigration=1`. The following live capture failed with `RUNNING_HOST_IDENTITY_MISMATCH`.
 
-The important evidence is that path, bundle ID, Host ABI/generation, Electron executable SHA, bootstrap SHA, HOST_ABI SHA and Host resources SHA all matched the installed receipt. Only the running `designatedRequirement` display parsed as empty, which caused `requirementMatch=false` and therefore `fingerprintMatch=false`.
+Path, bundle ID, Host ABI/generation, Electron executable SHA, bootstrap SHA, HOST_ABI SHA and Host resources SHA all matched the installed receipt. Only the running `designatedRequirement` display parsed as empty, which caused `requirementMatch=false` and `fingerprintMatch=false`.
 
-The same capture also showed a Chrome binding false ambiguity: candidate A exactly matched the CGWindow bounds (IoU=1.000), while candidate B was shifted by 26 px (IoU about 0.966). In addition, the live Chrome heartbeat still reported `extensionVersion=1.5.13` after the R2 disk install.
+The same capture showed a Chrome false ambiguity: candidate A exactly matched the CGWindow bounds (IoU=1.000), while candidate B was shifted by 26 px (IoU about 0.966). The live Chrome heartbeat also still reported `extensionVersion=1.5.13` after the R2 disk install.
 
 ## R3 closures
 
-1. Running Host identity no longer trusts only `codesign -d -r-` display parsing. If the receipt contains a DR, R3 tests the CURRENT `SideDock.app` with real `codesign --verify --deep --strict -R =<receipt requirement>`. Only a successful verification can supply the receipt requirement to the Host fingerprint. Failure remains fail-closed.
-2. Chrome binding now gives priority to the unique candidate whose x/y/width/height are all within 1 px of the exact target. If two candidates are both exact, the state remains AMBIGUOUS and SideDock does not guess.
-3. The installer clean-stops SideDock's own Electron process immediately before atomic runtime/Host handoff, then starts the committed App. The matcher uses command-prefix matching and does not self-match a grep/awk helper.
-4. Self-test and target-Mac Gate now require the LIVE Browser Adapter heartbeat to report `1.5.14`. If Chrome still holds the 1.5.13 service worker, the installer/self-test explicitly require one Chrome restart or unpacked-extension Reload.
+1. Running Host identity no longer trusts only `codesign -d -r-` display parsing. If the receipt contains a DR, R3 tests the CURRENT `SideDock.app` with real `codesign --verify --deep --strict -R =<receipt requirement>`. Only successful verification supplies the receipt requirement to the Host fingerprint; failure remains fail-closed.
+2. Installer `codesign_requirement()` also tolerates leading/variable whitespace before `designated =>`, preventing the same display-format class from falsely triggering another Host migration.
+3. Chrome binding gives priority to the unique candidate whose x/y/width/height are all within 1 px of the exact target. If two candidates are both exact, state remains AMBIGUOUS and SideDock does not guess.
+4. Installer clean-stops SideDock's own Electron process immediately before atomic runtime/Host handoff, then starts the committed App. The matcher uses command-prefix matching and cannot self-match a grep/awk helper.
+5. Self-test and target-Mac Gate require the LIVE Browser Adapter heartbeat to report `1.5.14`. If Chrome still holds the 1.5.13 service worker, one Chrome restart or unpacked-extension Reload is explicitly required.
 
 ## R3 automated / packaging QA
 
@@ -27,13 +28,13 @@ The same capture also showed a Chrome binding false ambiguity: candidate A exact
 - Active shell syntax: **6/6 PASS**
 - Active JSON parse: **12/12 PASS**
 - Static read-only/no-fullscreen/no-TCC-reset/no-user-compiler audit: **PASS**
-- BUILD_MANIFEST: **1186 files, 0 mismatch**
+- BUILD_MANIFEST: **1187 files, 0 mismatch**
 - Fresh extracted final ZIP regression: **136/136 PASS**
 - Fresh extracted final ZIP syntax: **221 JS / 6 Shell / 12 JSON PASS**
 - Fresh extracted final static safety and executable-bit Gate: **PASS**
 - ZIP integrity: **PASS**
 
-Final R3 ZIP SHA256: `3d5fab8815d1e1761b2e427c8bd610b6012bab00134436fef6017bb1370f74d7`
+Final R3 ZIP SHA256: `de970da20931527bebe4d3e885322d37e5daf261bd5b3cc67c6cc1a002c215e6`
 
 ## Real-Mac gates still pending
 
