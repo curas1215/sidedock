@@ -1,0 +1,34 @@
+SideDock v1.5.14 R3 FINAL VERIFICATION
+======================================
+
+Artifact: SideDock_v1.5.14_R3_MAC_INSTALL_KIT.zip
+SHA256: 3d5fab8815d1e1761b2e427c8bd610b6012bab00134436fef6017bb1370f74d7
+Installer revision: R3
+Release status: CODE_VALIDATED_V1514_R3_REAL_MAC_PERMISSION_BROWSER_GATE_PENDING
+
+Latest real-Mac root causes addressed in R3
+-------------------------------------------
+1. Running Host false identity mismatch: R2 evidence had path/bundle/ABI/generation/executable/bootstrap/HOST_ABI/resources hashes matching receipt. Only designatedRequirement display parsing was empty. R3 accepts the receipt requirement only after the CURRENT SideDock.app passes a real codesign -R verification; failure remains fail-closed.
+2. Chrome unique-exact false ambiguity: real target bounds and candidate A were identical (IoU 1.000), runner-up was shifted (IoU about 0.966). R3 gives priority to the unique <=1px exact geometry match; multiple exact candidates remain AMBIGUOUS.
+3. Clean SideDock process handoff: installer stops SideDock's own existing Electron process immediately before atomic handoff and starts the committed App afterward. Matcher uses command-prefix logic and does not self-match its own helper process.
+4. Loaded Chrome Extension version gate: real heartbeat still reported extensionVersion 1.5.13 after R2 installation. R3 self-test and target-Mac gate require the live heartbeat to report 1.5.14; installer tells the user to restart Chrome once or Reload the unpacked extension.
+
+Final frozen ZIP verification
+-----------------------------
+ZIP integrity: PASS
+BUILD_MANIFEST contract: sidedock-build-manifest/6
+Manifest files: 1186
+Manifest hash/size/mode mismatches before reverse tests: 0
+Manifest extra/missing files before reverse tests: 0/0
+Reverse-extracted automated regression: 136/136 PASS
+Reverse JavaScript syntax: 221/221 PASS
+Reverse Shell syntax: 6/6 PASS
+Reverse JSON parse: 12/12 PASS
+Reverse static safety: PASS
+Executable bits for 6 active/user shell entry points: PASS
+Manifest hash/size/mode mismatches after reverse tests: 0
+Manifest extra/missing files after reverse tests: 0/0
+
+Truth policy
+------------
+This does NOT claim FULLY_VERIFIED_ON_TARGET_MAC. macOS TCC permission grants, WindowServer pixels, the live Chrome 1.5.14 extension worker, Native->HTTP hedge, ChatGPT attachment ACK, outside-click latency, and >=50 unique pre-focus evidence still have to be produced by the target Mac.
